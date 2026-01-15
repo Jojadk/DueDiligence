@@ -1,397 +1,385 @@
 # DueDiligence v2.0
 
-Modern Project Management System for Building Inspections
+**Modern Project Management System for Building Inspections**
 
-## 🎯 Project Status
+## 🎯 Project Overview
 
-**Current Phase:** Foundation Setup ✅
-**Version:** 2.0.0-alpha
-**Last Updated:** January 15, 2026
+DueDiligence v2.0 er et nyt projekt management system bygget med en enkel, template-baseret arkitektur. Systemet bruger JSON/YAML konfiguration til dynamiske forms og modal-baseret brugerinterface.
 
-## 📋 What's New in v2.0
+## 📁 Fil Struktur
 
-This is a **complete rewrite** with modern PHP 8.1+ architecture:
+```
+DueDiligence/
+├── index.php                    # Hoved entry point
+├── core/
+│   ├── core.php                # Konstanter, funktioner, utilities
+│   ├── security.php            # CSRF, authentication, input validation
+│   └── icons.php               # SVG icon system
+├── modules/
+│   ├── project/
+│   │   ├── index.php          # Project modul logic
+│   │   └── template.tpl       # Project template
+│   ├── customer/
+│   │   ├── index.php
+│   │   └── template.tpl
+│   ├── building/
+│   │   ├── index.php
+│   │   └── template.tpl
+│   └── admin/
+│       ├── index.php
+│       └── template.tpl
+├── reports/
+│   ├── templates/
+│   │   ├── report_all.tpl    # Fuld rapport template
+│   │   └── report_excel.tpl  # Excel rapport template
+│   └── output/                 # Genererede rapporter
+├── projects/
+│   └── {unitID}/              # Project-specific data
+│       ├── uploads/           # Project uploads
+│       └── snapshots/         # Project snapshots
+├── uploads/                    # Globale uploads
+├── logs/                       # System logs
+├── config/
+│   └── forms.json             # Form struktur konfiguration
+├── OLD/                        # Gamle kodebase (backup)
+└── .gitignore
 
-- ✅ **Clean Architecture** - Separation of concerns with Repository and Service patterns
-- ✅ **PSR-4 Autoloading** - Modern PHP standards
-- ✅ **RESTful API** - JSON-based API endpoints
-- ✅ **Custom Fields System** - QDPM-inspired extensible fields
-- ✅ **Modern JavaScript** - ES6+ modules, no jQuery
-- ✅ **PostgreSQL** - With optimized schema and views
-- ✅ **Security First** - CSRF, Rate Limiting, Input Validation
-- ✅ **Dependency Injection** - Testable, maintainable code
+```
 
-### Old Codebase
+## ✨ Hovedfunktioner
 
-The previous version has been moved to `OLD/` directory for reference.
+### 1. JSON/YAML Driven Forms
 
-## 🚀 Getting Started
+Alle forms er defineret i `config/forms.json` med følgende struktur:
 
-### Prerequisites
+```json
+{
+  "forms": {
+    "project": {
+      "title": "Projekt",
+      "fields": [
+        {
+          "name": "name",
+          "label": "Projekt Navn",
+          "type": "text",
+          "required": true,
+          "locked": true
+        }
+      ],
+      "custom_fields": []
+    }
+  }
+}
+```
 
-- PHP >= 8.1
+**Felter kan være:**
+- `required`: true/false - Påkrævet felt
+- `locked`: true/false - Kan ikke slettes, kun flyttes
+- `type`: text, textarea, number, date, select, checkbox, email, tel
+
+### 2. Custom Fields System
+
+Custom fields kan tilføjes dynamisk til enhver entity:
+- Globale custom fields (gælder alle projekter)
+- Project-specifikke custom fields
+- Validering baseret på field type
+- Automatisk rendering i forms
+
+### 3. Modal-baseret UI
+
+- Hoveds ide med modal windows til CRUD operationer
+- Ingen page reloads
+- AJAX-baseret datahentning
+- Smooth user experience
+
+### 4. Sikkerhed
+
+- ✅ CSRF beskyttelse på alle forms
+- ✅ Input sanitization og validation
+- ✅ SQL injection beskyttelse (prepared statements)
+- ✅ XSS beskyttelse (output escaping)
+- ✅ Rate limiting på login
+- ✅ Secure file uploads
+- ✅ Session security
+
+## 🚀 Installation
+
+### Krav
+
+- PHP >= 8.0
 - PostgreSQL >= 14
-- Composer
-- Node.js >= 16 (for frontend build tools)
+- Web server (Apache/Nginx)
 
-### Installation
+### Opsætning
 
-1. **Clone the repository**
+1. **Klon repository**
    ```bash
    git clone https://github.com/Jojadk/DueDiligence.git
    cd DueDiligence
    ```
 
-2. **Install PHP dependencies**
-   ```bash
-   composer install
-   ```
-
-3. **Configure environment**
-   ```bash
-   cp .env.example .env
-   # Edit .env with your database credentials
-   ```
-
-4. **Create database**
+2. **Opret database**
    ```bash
    createdb duediligence
+   psql duediligence < OLD/schema_pgsql.sql
    ```
 
-5. **Run migrations**
+3. **Konfigurer database**
+
+   Sæt environment variables eller rediger `core/core.php`:
    ```bash
-   psql duediligence < database/schema.sql
+   export DB_HOST=localhost
+   export DB_NAME=duediligence
+   export DB_USER=postgres
+   export DB_PASS=yourpassword
    ```
 
-6. **Set permissions**
+4. **Sæt permissions**
    ```bash
-   chmod -R 775 storage
-   chmod -R 775 public/assets/uploads
+   chmod -R 775 projects/
+   chmod -R 775 uploads/
+   chmod -R 775 logs/
    ```
 
-7. **Start development server**
+5. **Start server**
    ```bash
-   cd public
    php -S localhost:8000
    ```
 
-8. **Access the application**
-   - URL: http://localhost:8000
-   - Default credentials: `admin` / `admin123` (CHANGE IN PRODUCTION!)
-
-## 📁 Project Structure
-
-```
-DueDiligence/
-├── app/                    # Application code
-│   ├── Config/            # Configuration classes
-│   ├── Controllers/       # HTTP controllers (API & Web)
-│   ├── Models/            # Data models
-│   ├── Repositories/      # Data access layer
-│   ├── Services/          # Business logic layer
-│   ├── Middleware/        # HTTP middleware
-│   ├── Core/              # Framework core components
-│   ├── Exceptions/        # Custom exceptions
-│   └── Helpers/           # Helper functions
-├── config/                 # Configuration files
-├── database/              # Database files
-│   ├── migrations/        # Database migrations
-│   ├── seeds/             # Database seeders
-│   └── schema.sql         # Complete database schema
-├── public/                 # Public web root
-│   ├── index.php          # Entry point
-│   └── assets/            # CSS, JS, uploads
-├── resources/             # Views and templates
-│   └── views/
-├── storage/               # Logs, cache, sessions
-│   ├── logs/
-│   ├── cache/
-│   └── sessions/
-├── tests/                  # Automated tests
-├── OLD/                    # Previous codebase (backup)
-├── composer.json          # PHP dependencies
-├── .env                    # Environment configuration
-└── README.md              # This file
-```
-
-## 🏗️ Architecture Overview
-
-### Core Components
-
-1. **Dependency Injection Container** (`app/Core/Container.php`)
-   - Manages class dependencies
-   - Supports singletons
-   - Auto-resolution via reflection
-
-2. **Router** (`app/Core/Router.php`)
-   - RESTful routing
-   - Named parameters
-   - Middleware support
-
-3. **Repository Pattern** (`app/Repositories/`)
-   - Data access abstraction
-   - Base repository with CRUD operations
-   - Specialized repositories for each model
-
-4. **Service Layer** (`app/Services/`)
-   - Business logic
-   - Validation
-   - Complex operations
-
-5. **Custom Fields System**
-   - QDPM-inspired extensible fields
-   - Multiple field types
-   - Entity-specific or global scope
-   - Validation rules
-
-### Database Design
-
-- **PostgreSQL 14+** with advanced features
-- **Views** for complex queries
-- **Triggers** for automatic timestamp updates
-- **Functions** for business logic
-- **Proper indexing** for performance
-
-See `ARCHITECTURE_2026.md` for detailed architecture documentation.
-
-## 📊 Features
-
-### Core Features
-
-- ✅ **Project Management** - Full lifecycle management
-- ✅ **Building Element Hierarchy** - Tree structure with parent/child
-- ✅ **Custom Fields** - Dynamic, configurable fields
-- ✅ **Budget Tracking** - Per-element budget with time horizons
-- ✅ **Media Management** - Image uploads with canvas annotations
-- ✅ **Customer Management** - Client information
-- ✅ **User Management** - RBAC with roles and permissions
-- ✅ **Activity Logging** - Full audit trail
-- ✅ **Concurrent Editing** - Field locking system
-- ✅ **Reporting** - Excel/PDF exports
-- ✅ **Internationalization** - Multi-language support
-
-### Security Features
-
-- ✅ CSRF Protection
-- ✅ Rate Limiting
-- ✅ Input Validation
-- ✅ SQL Injection Prevention
-- ✅ XSS Protection
-- ✅ Secure Password Hashing (bcrypt)
-- ✅ JWT Tokens for API
-
-### API Endpoints
-
-All API endpoints return JSON and are located under `/api/`:
-
-```
-Authentication:
-POST   /api/auth/login
-POST   /api/auth/logout
-GET    /api/auth/user
-
-Projects:
-GET    /api/projects
-GET    /api/projects/{id}
-POST   /api/projects
-PUT    /api/projects/{id}
-DELETE /api/projects/{id}
-
-Building Elements:
-GET    /api/elements
-GET    /api/elements/{id}
-POST   /api/elements
-PUT    /api/elements/{id}
-DELETE /api/elements/{id}
-
-Custom Fields:
-GET    /api/custom-fields
-POST   /api/custom-fields
-PUT    /api/custom-fields/{id}
-DELETE /api/custom-fields/{id}
-GET    /api/custom-fields/entity/{type}/{id}
-PUT    /api/custom-fields/entity/{type}/{id}
-
-... and more
-```
-
-See `ARCHITECTURE_2026.md` for complete API documentation.
-
-## 🔧 Development
-
-### Running Tests
-
-```bash
-composer test
-```
-
-### Code Quality
-
-The project follows PSR-12 coding standards:
-
-```bash
-# Check code style
-composer cs-check
-
-# Fix code style
-composer cs-fix
-```
-
-### Database Migrations
-
-Migrations are SQL files in `database/migrations/`:
-
-```bash
-# Create new migration
-php database/make_migration.php "add_new_field_to_projects"
-
-# Run migrations
-php database/migrate.php
-
-# Rollback
-php database/rollback.php
-```
-
-## 📚 Documentation
-
-- [Architecture Guide](ARCHITECTURE_2026.md) - Complete system architecture
-- [Code Review Report](COMPREHENSIVE_CODE_REVIEW_2026.md) - Analysis of old system
-- [API Documentation](docs/API.md) - REST API reference *(coming soon)*
-- [Custom Fields Guide](docs/CUSTOM_FIELDS.md) - How to use custom fields *(coming soon)*
-
-## 🎨 Custom Fields System
-
-Inspired by **QDPM Extra Fields**, our custom fields system allows you to extend any entity (projects, building elements, customers) with custom data:
-
-### Field Types Supported
-
-- Text (single line)
-- Textarea (multi-line)
-- Number
-- Date
-- DateTime
-- Select (dropdown)
-- Multi-Select
-- Checkbox
-- Radio buttons
-- Email
-- URL
-- Phone
-
-### Example Usage
-
-```php
-// Create a custom field definition
-$customFieldService->createField([
-    'entity_type' => 'project',
-    'field_name' => 'environmental_class',
-    'field_label' => 'Environmental Class',
-    'field_type' => 'select',
-    'options' => [
-        ['value' => 'A', 'label' => 'Class A - Low Impact'],
-        ['value' => 'B', 'label' => 'Class B - Medium Impact'],
-        ['value' => 'C', 'label' => 'Class C - High Impact']
-    ],
-    'required' => true,
-    'scope' => 'global'
-]);
-
-// Set value for a project
-$customFieldService->setValue('project', $projectId, 'environmental_class', 'B');
-
-// Get all custom fields for a project
-$fields = $customFieldService->getFieldsWithValues('project', $projectId);
-```
-
-## 🚧 Implementation Status
-
-### ✅ Completed
-
-- [x] Project structure setup
-- [x] Database schema design
-- [x] Architecture documentation
-- [x] Composer configuration
-- [x] Environment configuration
-
-### 🔄 In Progress
-
-- [ ] Core framework implementation
-  - [ ] Container (DI)
-  - [ ] Router
-  - [ ] Request/Response
-  - [ ] Database abstraction
-- [ ] Authentication system
-- [ ] Base controllers and repositories
-- [ ] Custom fields service
-- [ ] Frontend JavaScript modules
-
-### 📋 Pending
-
-- [ ] Project management module
-- [ ] Building element module
-- [ ] Budget module
-- [ ] Media management
-- [ ] Reporting system
-- [ ] User interface (views)
-- [ ] Data migration from OLD system
-- [ ] Unit tests
-- [ ] Integration tests
-- [ ] Documentation
-- [ ] Deployment scripts
-
-## 🤝 Contributing
-
-1. Create a feature branch
-2. Make your changes
-3. Write/update tests
-4. Ensure code follows PSR-12
-5. Submit pull request
-
-## 📝 License
-
-MIT License - See LICENSE file for details
-
-## 👥 Team
-
-- **Original System:** See `OLD/` directory
-- **v2.0 Architecture:** Claude AI & Development Team
-
-## 📞 Support
-
-For questions or issues:
-- GitHub Issues: https://github.com/Jojadk/DueDiligence/issues
-- Email: support@duediligence.local
-
-## 🔄 Migration from v1.0
-
-To migrate data from the old system:
-
-1. Ensure OLD/ directory contains the previous codebase
-2. Backup your database
-3. Run migration script:
-   ```bash
-   php database/migrate_from_old.php
+6. **Åbn i browser**
+   ```
+   http://localhost:8000
    ```
 
-See [MIGRATION_GUIDE.md](docs/MIGRATION_GUIDE.md) for detailed instructions *(coming soon)*.
+**Standard login:** `admin` / `admin123` (SKIFT I PRODUKTION!)
+
+## 📝 Brug af Forms
+
+### Render et form
+
+```php
+// I et modul (modules/project/index.php)
+$formHtml = render_form('project', $data, $errors);
+echo $formHtml;
+```
+
+### Validere form data
+
+```php
+$errors = validate_form('project', $_POST);
+
+if (empty($errors)) {
+    // Gem data
+    db_insert('projects', $_POST);
+} else {
+    // Vis fejl
+    echo render_form('project', $_POST, $errors);
+}
+```
+
+### Tilføje custom fields
+
+Custom fields administreres via admin interface eller direkte i databasen:
+
+```sql
+INSERT INTO custom_field_definitions (
+    entity_type, field_name, field_label, field_type, required, scope
+) VALUES (
+    'project', 'environmental_class', 'Miljøklasse', 'select', false, 'global'
+);
+```
+
+## 🎨 Template System
+
+Templates bruger PHP med adskillelse af logik og præsentation:
+
+### Eksempel Template (modules/project/template.tpl)
+
+```php
+<?php
+// Template variabler er tilgængelige via extract()
+?>
+<!DOCTYPE html>
+<html>
+<head>
+    <title><?= esc_html($title) ?></title>
+</head>
+<body>
+    <h1><?= echo_icon('folder', 32) ?> <?= esc_html($title) ?></h1>
+
+    <div class="form-container">
+        <?= $formHtml ?>
+    </div>
+
+    <?= csrf_field() ?>
+</body>
+</html>
+```
+
+### Load Template
+
+```php
+load_template(template_path('project', 'template'), [
+    'title' => 'Projekt',
+    'formHtml' => render_form('project', $data)
+]);
+```
+
+## 🔧 Core Funktioner
+
+### Database
+
+```php
+// Query med results
+$projects = db_query("SELECT * FROM projects WHERE active = :active", ['active' => true]);
+
+// Single row
+$project = db_fetch("SELECT * FROM projects WHERE id = :id", ['id' => 1]);
+
+// Insert
+$projectId = db_insert('projects', ['name' => 'Test', 'status' => 'active']);
+
+// Update
+db_update('projects', ['status' => 'completed'], 'id = :id', ['id' => 1]);
+
+// Delete
+db_delete('projects', 'id = :id', ['id' => 1]);
+```
+
+### Security
+
+```php
+// Generate CSRF token
+$token = csrf_token();
+
+// Validate CSRF
+if (csrf_validate()) {
+    // Process form
+}
+
+// Sanitize input
+$clean = sanitize_string($_POST['name']);
+$email = sanitize_email($_POST['email']);
+$int = sanitize_int($_POST['id']);
+
+// Upload file
+$result = save_upload($_FILES['file'], UPLOADS_DIR);
+```
+
+### Utilities
+
+```php
+// Format money (Danish)
+echo $format_money(1000); // 1.000,00 kr.
+
+// Format date (Danish)
+echo $format_date('2026-01-15'); // 15-01-2026
+
+// Generate unique ID
+$id = $generate_id(); // Hex string
+
+// Get project directory
+$dir = get_project_dir(123); // /path/to/projects/123/
+```
+
+## 📊 Database Schema
+
+Brug det eksisterende PostgreSQL schema fra OLD system:
+
+```bash
+psql duediligence < OLD/schema_pgsql.sql
+```
+
+Schema inkluderer:
+- users, roles, permissions
+- projects, customers
+- building_elements (hierarchical)
+- custom_field_definitions & values
+- budget_items
+- element_media
+- activity_logs
+
+## 🔐 Sikkerhed Best Practices
+
+1. **Altid brug CSRF beskyttelse**
+   ```php
+   <?= csrf_field() ?>
+   ```
+
+2. **Escape alt output**
+   ```php
+   <?= esc_html($userInput) ?>
+   <?= esc_attr($attribute) ?>
+   ```
+
+3. **Brug prepared statements**
+   ```php
+   db_query($sql, $params); // Automatisk prepared
+   ```
+
+4. **Validate alle inputs**
+   ```php
+   $errors = validate_form('entity', $_POST);
+   ```
+
+5. **Check permissions**
+   ```php
+   require_permission('project.edit');
+   ```
+
+## 📖 Næste Skridt
+
+1. **Implementer modules/**
+   - project/index.php & template.tpl
+   - customer/index.php & template.tpl
+   - building/index.php & template.tpl
+   - admin/index.php & template.tpl
+
+2. **Opret report templates**
+   - reports/templates/report_all.tpl
+   - reports/templates/report_excel.tpl
+
+3. **Byg frontend**
+   - CSS styling
+   - JavaScript for modals
+   - AJAX forms
+
+4. **Test og deploy**
+
+## 🆚 Forskelle fra OLD System
+
+| Feature | OLD | NEW |
+|---------|-----|-----|
+| Struktur | Complex MVC | Simpel template-baseret |
+| Forms | Hardcoded PHP | JSON konfiguration |
+| UI | Multi-page | Modal-baseret |
+| Database | Mixed (MySQL/PostgreSQL) | PostgreSQL only |
+| Routing | Complex Router class | Simpel module loader |
+| Config | PHP constants | JSON files |
+
+## 📚 Dokumentation
+
+- **Code Review:** Se `OLD/COMPREHENSIVE_CODE_REVIEW_2026.md`
+- **Old Architecture:** Se `OLD/` directory
+- **Forms Config:** Se `config/forms.json`
+
+## 🐛 Debugging
+
+Logs gemmes i:
+- `logs/error.log` - Application errors
+- `logs/php_errors.log` - PHP errors
+
+Enable debug mode i `core/core.php`:
+```php
+ini_set('display_errors', '1'); // VIGTIGT: Slå fra i produktion!
+```
+
+## 📄 Licens
+
+MIT License
 
 ---
 
-**Status:** 🚧 Active Development
-**Branch:** `claude/code-review-optimization-6Y6Su`
+**Version:** 2.0.0
 **Last Updated:** January 15, 2026
-
-## Next Steps
-
-To continue development:
-
-1. **Implement Core Framework** - Container, Router, Database classes
-2. **Build Authentication** - Login, sessions, JWT tokens
-3. **Create Base Controllers** - API and Web base controllers
-4. **Implement Repositories** - Data access layer
-5. **Build Frontend** - Modern JavaScript modules
-6. **Write Tests** - Unit and integration tests
-7. **Migrate Data** - From OLD system
-8. **Deploy** - Production environment
-
-See `ARCHITECTURE_2026.md` for detailed implementation plan and timeline.
+**Status:** 🚧 Under Development
