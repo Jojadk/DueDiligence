@@ -1,0 +1,221 @@
+/* window.css - MacOS-like Window Manager Styles */
+
+/* The Desktop Area - Assume body or main wrapper */
+#desktop-area {
+    position: relative;
+    width: 100%;
+    height: 100vh;
+    /* Or remaining height */
+    overflow: hidden;
+}
+
+/* Window Container */
+.wm-window {
+    position: absolute;
+    background: #fff;
+    border-radius: 8px;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    min-width: 300px;
+    min-height: 200px;
+    resize: both;
+    /* Native resize handle */
+    border: 1px solid rgba(0, 0, 0, 0.1);
+    transition: box-shadow 0.2s, transform 0.1s;
+}
+
+.wm-window.active {
+    box-shadow: 0 15px 40px rgba(0, 0, 0, 0.3);
+    z-index: 1000;
+    /* High but managed by JS */
+    border-color: #aaa;
+}
+
+/* Window Header / Titlebar */
+.wm-header {
+    background: #f3f4f6;
+    /* MacOS gray */
+    padding: 8px 12px;
+    display: flex;
+    align-items: center;
+    cursor: default;
+    border-bottom: 1px solid #e5e7eb;
+    user-select: none;
+    height: 36px;
+}
+
+.wm-controls {
+    display: flex;
+    gap: 8px;
+    margin-right: 12px;
+}
+
+.wm-btn {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    border: none;
+    cursor: pointer;
+    padding: 0;
+}
+
+.wm-close {
+    background: #ff5f56;
+    border: 1px solid #e0443e;
+}
+
+.wm-min {
+    background: #ffbd2e;
+    border: 1px solid #dea123;
+}
+
+.wm-max {
+    background: #27c93f;
+    border: 1px solid #1aab29;
+}
+
+.wm-close:hover {
+    background: #ff4038;
+}
+
+.wm-min:hover {
+    background: #ffa000;
+}
+
+.wm-max:hover {
+    background: #1ec92e;
+}
+
+/* Symbols inside buttons on hover (CSS trick) */
+.wm-controls:hover .wm-btn::after {
+    display: block;
+    font-size: 8px;
+    line-height: 12px;
+    text-align: center;
+    color: rgba(0, 0, 0, 0.5);
+    font-weight: bold;
+}
+
+.wm-close::after {
+    content: 'x';
+    display: none;
+}
+
+.wm-min::after {
+    content: '-';
+    display: none;
+}
+
+.wm-max::after {
+    content: '+';
+    display: none;
+}
+
+.wm-controls:hover .wm-close::after,
+.wm-controls:hover .wm-min::after,
+.wm-controls:hover .wm-max::after {
+    display: block;
+}
+
+
+.wm-title {
+    flex: 1;
+    text-align: center;
+    font-weight: 500;
+    color: #374151;
+    font-size: 0.9rem;
+}
+
+/* Window Body */
+.wm-body {
+    flex: 1;
+    overflow: auto;
+    /* Scroll X/Y if needed */
+    position: relative;
+    background: #fff;
+    padding: 0;
+}
+
+/* Iframe support */
+.wm-body iframe {
+    width: 100%;
+    height: 100%;
+    border: none;
+}
+
+/* Dock / Taskbar */
+#wm-dock {
+    position: fixed;
+    bottom: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(255, 255, 255, 0.7);
+    backdrop-filter: blur(10px);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    border-radius: 16px;
+    padding: 8px 12px;
+    display: none;
+    /* Hidden by default */
+    gap: 10px;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
+    z-index: 9999;
+    height: 64px;
+    align-items: center;
+    transition: bottom 0.3s;
+}
+
+.dock-item {
+    width: 48px;
+    height: 48px;
+    border-radius: 8px;
+    background: #ddd;
+    /* Fallback */
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    cursor: pointer;
+    transition: transform 0.2s;
+    position: relative;
+}
+
+.dock-item:hover {
+    transform: scale(1.1) translateY(-5px);
+}
+
+.dock-item img {
+    width: 100%;
+    height: 100%;
+    border-radius: 8px;
+    object-fit: cover;
+}
+
+.dock-item.minimized::after {
+    content: '';
+    position: absolute;
+    bottom: -6px;
+    width: 4px;
+    height: 4px;
+    background: #333;
+    border-radius: 50%;
+}
+
+
+.dock-separator {
+    width: 1px;
+    height: 40px;
+    background: rgba(0, 0, 0, 0.1);
+    margin: 0 5px;
+}
+
+/* Fix mobile button sizing override */
+@media (max-width: 768px) {
+    .wm-controls .wm-btn {
+        width: 12px !important;
+        height: 12px !important;
+        min-width: 12px !important;
+        min-height: 12px !important;
+        padding: 0 !important;
+    }
+}
