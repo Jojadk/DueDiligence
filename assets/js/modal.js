@@ -42,6 +42,9 @@ const Modal = {
             return null;
         }
 
+        // Reset modal position to center
+        this.resetModalPosition(modalEl, contentEl);
+
         // Build modal content
         let modalHtml = '';
 
@@ -325,6 +328,48 @@ const Modal = {
                 }
             });
         });
+    },
+
+    /**
+     * Reset modal position to center
+     */
+    resetModalPosition(modalEl, contentEl) {
+        // Remove any maximized state
+        contentEl.classList.remove('modal-maximized');
+
+        // Reset scroll position
+        modalEl.scrollTop = 0;
+
+        // Ensure modal content is centered
+        // This happens automatically with CSS flexbox centering
+        // But we can force a reflow to ensure positioning is recalculated
+        void modalEl.offsetHeight;
+    },
+
+    /**
+     * Maximize modal
+     */
+    maximize(modalId) {
+        const contentId = modalId.replace('Modal', 'ModalContent');
+        const contentEl = document.getElementById(contentId);
+
+        if (contentEl) {
+            contentEl.classList.add('modal-maximized');
+        }
+    },
+
+    /**
+     * Restore modal from maximized state
+     */
+    restore(modalId) {
+        const modalEl = document.getElementById(modalId);
+        const contentId = modalId.replace('Modal', 'ModalContent');
+        const contentEl = document.getElementById(contentId);
+
+        if (modalEl && contentEl) {
+            // Reset to center when restoring
+            this.resetModalPosition(modalEl, contentEl);
+        }
     }
 };
 
