@@ -30,7 +30,42 @@
 $statusMap = ['planning'=>'Planlægning','active'=>'Aktiv','on_hold'=>'På vent','completed'=>'Afsluttet','archived'=>'Arkiveret'];
 $statusClass = ['planning'=>'badge-warning','active'=>'badge-success','on_hold'=>'badge-secondary','completed'=>'badge-info','archived'=>'badge-muted'];
 ?>
-<tr><td class="font-semibold"><a href="#" onclick="navigate('building', {project_id: <?= $p['id'] ?>}); return false;" class="link"><?= esc_html($p['name']) ?></a></td><td><?= esc_html($p['customer_name']) ?></td><td><?= esc_html($p['address']) ?>, <?= esc_html($p['postal_code']) ?> <?= esc_html($p['city']) ?></td><td><?php if ($p['building_count'] > 0): ?><a href="#" onclick="navigate('building', {project_id: <?= $p['id'] ?>}); return false;" class="badge badge-info"><?= $p['building_count'] ?></a><?php else: ?>-<?php endif; ?></td><td><?= $p['element_count'] > 0 ? $p['element_count'] : '-' ?></td><td><span class="badge <?= $statusClass[$p['status']??'badge-secondary'] ?>"><?= $statusMap[$p['status']]??$p['status'] ?></span></td><td class="actions-column"><button class="btn-icon" onclick="ProjectModule.openEdit(<?= $p['id'] ?>)"><?= icon('edit', 18) ?></button><button class="btn-icon btn-icon-danger" onclick="ProjectModule.confirmDelete(<?= $p['id'] ?>, '<?= esc_js($p['name']) ?>')"><?= icon('trash', 18) ?></button></td></tr>
+<tr>
+    <td class="font-semibold">
+        <a href="#" onclick="navigate('building', {project_id: <?= $p['id'] ?>}); return false;" class="link">
+            <?= esc_html($p['name']) ?>
+        </a>
+    </td>
+    <td><?= esc_html($p['customer_name']) ?></td>
+    <td><?= esc_html($p['address']) ?>, <?= esc_html($p['postal_code']) ?> <?= esc_html($p['city']) ?></td>
+    <td>
+        <?php if ($p['building_count'] > 0): ?>
+            <a href="#" onclick="navigate('building', {project_id: <?= $p['id'] ?>}); return false;" class="badge badge-info">
+                <?= $p['building_count'] ?>
+            </a>
+        <?php else: ?>-<?php endif; ?>
+    </td>
+    <td><?= $p['element_count'] > 0 ? $p['element_count'] : '-' ?></td>
+    <td><span class="badge <?= $statusClass[$p['status']??'badge-secondary'] ?>"><?= $statusMap[$p['status']]??$p['status'] ?></span></td>
+    <td class="actions-column">
+        <?php if ($permissions['create_snapshots']): ?>
+        <button class="btn-icon" onclick="ProjectSnapshot.showManager(<?= $p['id'] ?>)" title="Snapshots">
+            <?= icon('archive', 18) ?>
+        </button>
+        <?php endif; ?>
+        <?php if ($permissions['copy_projects']): ?>
+        <button class="btn-icon" onclick="ProjectModule.copyProject(<?= $p['id'] ?>, '<?= esc_js($p['name']) ?>')" title="Kopier projekt">
+            <?= icon('copy', 18) ?>
+        </button>
+        <?php endif; ?>
+        <button class="btn-icon" onclick="ProjectModule.openEdit(<?= $p['id'] ?>)">
+            <?= icon('edit', 18) ?>
+        </button>
+        <button class="btn-icon btn-icon-danger" onclick="ProjectModule.confirmDelete(<?= $p['id'] ?>, '<?= esc_js($p['name']) ?>')">
+            <?= icon('trash', 18) ?>
+        </button>
+    </td>
+</tr>
 <?php endforeach; ?>
 </tbody></table></div>
 
@@ -141,6 +176,40 @@ const ProjectModule = {
                 if (r.success) { Toast.success('Slettet'); Router.reload(); }
                 else Toast.error(r.error);
             } catch(e) { Toast.error('Sletningsfejl'); }
+        }
+    },
+
+    async copyProject(id, name) {
+        const newName = await Modal.prompt(`Kopier projekt "${name}"`, {
+            label: 'Nyt projektnavn:',
+            defaultValue: `${name} (kopi)`,
+            confirmText: 'Kopier',
+            confirmClass: 'btn-primary'
+        });
+
+        if (!newName) return;
+
+        App.showLoading('Kopierer projekt...');
+
+        try {
+            const fd = new FormData();
+            fd.append('action', 'copy_project');
+            fd.append('project_id', id);
+            fd.append('new_name', newName);
+
+            const r = await API.post('/api.php', fd, true);
+
+            App.hideLoading();
+
+            if (r.success) {
+                Toast.success('Projekt kopieret');
+                Router.reload();
+            } else {
+                Toast.error(r.error || 'Kunne ikke kopiere projekt');
+            }
+        } catch(e) {
+            App.hideLoading();
+            Toast.error('Netværksfejl ved kopiering');
         }
     },
 

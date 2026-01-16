@@ -74,6 +74,11 @@ try {
             echo json_encode(listSnapshots($currentUser));
             break;
 
+        case 'delete_snapshot':
+            csrf_require();
+            echo json_encode(deleteSnapshot($currentUser));
+            break;
+
         // Project Copying (with permissions)
         case 'copy_project':
             csrf_require();
@@ -498,9 +503,56 @@ function listSnapshots(array $user): array {
         return ['success' => false, 'error' => 'Ingen adgang'];
     }
 
-    $snapshots = db_query("SELECT id, description, created_at, created_by FROM snapshots WHERE project_id = :id ORDER BY created_at DESC", ['id' => $projectId]);
+    $snapshots = db_query("
+        SELECT s.id, s.name, s.description, s.snapshot_data, s.created_at, s.created_by,
+               u.name as created_by_name
+        FROM snapshots s
+        LEFT JOIN users u ON s.created_by = u.id
+        WHERE s.project_id = :id
+        ORDER BY s.created_at DESC
+    ", ['id' => $projectId]);
+
+    // Parse stats from snapshot_data for each snapshot
+    foreach ($snapshots as &$snapshot) {
+        $data = json_decode($snapshot['snapshot_data'], true);
+        $snapshot['stats'] = [
+            'buildings' => count($data['buildings'] ?? []),
+            'elements' => count($data['elements'] ?? []),
+            'files' => count($data['files'] ?? [])
+        ];
+        unset($snapshot['snapshot_data']); // Don't send full data in list
+    }
 
     return ['success' => true, 'snapshots' => $snapshots];
+}
+
+function deleteSnapshot(array $user): array {
+    if (!has_permission($user, 'create_snapshots')) {
+        return ['success' => false, 'error' => 'Ingen tilladelse til at slette snapshots'];
+    }
+
+    $snapshotId = sanitize_int($_POST['snapshot_id'] ?? 0);
+
+    // Get snapshot and verify ownership
+    $snapshot = db_fetch("SELECT s.*, p.user_id FROM snapshots s JOIN projects p ON s.project_id = p.id WHERE s.id = :id", ['id' => $snapshotId]);
+
+    if (!$snapshot) {
+        return ['success' => false, 'error' => 'Snapshot ikke fundet'];
+    }
+
+    // Verify ownership
+    if (!has_permission($user, 'admin') && $snapshot['user_id'] != $user['id']) {
+        return ['success' => false, 'error' => 'Ingen adgang til dette snapshot'];
+    }
+
+    try {
+        db_delete('snapshots', 'id = :id', ['id' => $snapshotId]);
+        log_activity('snapshot_deleted', 'snapshot', $snapshotId);
+        return ['success' => true];
+    } catch (Exception $e) {
+        log_error('Snapshot delete error: ' . $e->getMessage());
+        return ['success' => false, 'error' => 'Kunne ikke slette snapshot'];
+    }
 }
 
 /* ========================================

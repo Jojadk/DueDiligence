@@ -246,6 +246,8 @@ if (isset($_GET['error'])) {
 }
 
 // Load template
+$permissions = get_user_permissions(current_user()['id']);
+
 load_template(template_path('project', 'template'), [
     'projects' => $projects,
     'totalProjects' => $totalProjects,
@@ -254,5 +256,6 @@ load_template(template_path('project', 'template'), [
     'searchTerm' => $searchTerm,
     'customerId' => $customerId,
     'successMessage' => $successMessage,
-    'errorMessage' => $errorMessage
+    'errorMessage' => $errorMessage,
+    'permissions' => $permissions
 ]);
