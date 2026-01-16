@@ -220,10 +220,18 @@
     <script src="/assets/js/modal.js"></script>
     <script src="/assets/js/toast.js"></script>
     <script src="/assets/js/searchable-select.js"></script>
+    <script src="/assets/js/offline-sync.js"></script>
     <script src="/assets/js/main.js"></script>
     <script src="/assets/js/app.js"></script>
 
     <script>
+        // Register Service Worker for offline support
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.register('/sw.js')
+                .then(reg => console.log('[SW] Registered:', reg.scope))
+                .catch(err => console.error('[SW] Registration failed:', err));
+        }
+
         // Initialize app on DOM ready
         document.addEventListener('DOMContentLoaded', function() {
             App.init();
