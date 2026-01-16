@@ -6,6 +6,7 @@
     <title><?= $pageTitle ?? 'DueDiligence v2.0' ?></title>
     <meta name="description" content="DueDiligence - Bygningsgennemgang og tilstandsrapporter">
     <link rel="stylesheet" href="/assets/css/main.css">
+    <link rel="stylesheet" href="/assets/css/image-upload.css">
 </head>
 <body>
     <!-- Top Header -->
@@ -220,6 +221,8 @@
     <script src="/assets/js/modal.js"></script>
     <script src="/assets/js/toast.js"></script>
     <script src="/assets/js/searchable-select.js"></script>
+    <script src="/assets/js/drag-drop.js"></script>
+    <script src="/assets/js/image-upload.js"></script>
     <script src="/assets/js/offline-sync.js"></script>
     <script src="/assets/js/main.js"></script>
     <script src="/assets/js/app.js"></script>

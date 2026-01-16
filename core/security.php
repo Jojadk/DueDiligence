@@ -515,3 +515,323 @@ function check_session_timeout(): void {
 
 // Initialize security
 configure_secure_session();
+
+// ============================================================================
+// ROLE-BASED PERMISSIONS (Backend-Controlled)
+// ============================================================================
+
+/**
+ * Get user permissions based on role
+ * NEVER trust frontend - all permissions checked here
+ */
+function get_user_permissions(int $userId): array {
+    $user = db_fetch("SELECT role FROM users WHERE id = :id", ['id' => $userId]);
+    if (!$user) return [];
+
+    $role = $user['role'] ?? 'viewer';
+
+    $permissions = [
+        'admin' => [
+            'admin' => true,
+            'view_all_projects' => true,
+            'create_projects' => true,
+            'edit_projects' => true,
+            'delete_projects' => true,
+            'view_customers' => true,
+            'create_customers' => true,
+            'edit_customers' => true,
+            'delete_customers' => true,
+            'edit_elements' => true,
+            'delete_elements' => true,
+            'upload_images' => true,
+            'delete_images' => true,
+            'create_snapshots' => true,
+            'restore_snapshots' => true,
+            'copy_projects' => true,
+            'create_templates' => true,
+            'manage_users' => true,
+            'edit_prices' => true,
+            'view_reports' => true
+        ],
+        'user' => [
+            'admin' => false,
+            'view_all_projects' => false,
+            'create_projects' => true,
+            'edit_projects' => true, // Only own
+            'delete_projects' => true, // Only own
+            'view_customers' => true,
+            'create_customers' => true,
+            'edit_customers' => true,
+            'delete_customers' => false,
+            'edit_elements' => true,
+            'delete_elements' => true,
+            'upload_images' => true,
+            'delete_images' => true, // Only own
+            'create_snapshots' => true,
+            'restore_snapshots' => true,
+            'copy_projects' => true,
+            'create_templates' => false,
+            'manage_users' => false,
+            'edit_prices' => false,
+            'view_reports' => true
+        ],
+        'viewer' => [
+            'admin' => false,
+            'view_all_projects' => false,
+            'create_projects' => false,
+            'edit_projects' => false,
+            'delete_projects' => false,
+            'view_customers' => true,
+            'create_customers' => false,
+            'edit_customers' => false,
+            'delete_customers' => false,
+            'edit_elements' => false,
+            'delete_elements' => false,
+            'upload_images' => false,
+            'delete_images' => false,
+            'create_snapshots' => false,
+            'restore_snapshots' => false,
+            'copy_projects' => false,
+            'create_templates' => false,
+            'manage_users' => false,
+            'edit_prices' => false,
+            'view_reports' => true
+        ]
+    ];
+
+    return $permissions[$role] ?? $permissions['viewer'];
+}
+
+/**
+ * Check if user has specific permission
+ */
+function has_permission(array $user, string $permission): bool {
+    $permissions = get_user_permissions($user['id']);
+    return $permissions[$permission] ?? false;
+}
+
+/**
+ * Check if user owns a project
+ */
+function user_owns_project(int $userId, int $projectId): bool {
+    $project = db_fetch("SELECT user_id FROM projects WHERE id = :id", ['id' => $projectId]);
+    return $project && $project['user_id'] == $userId;
+}
+
+/**
+ * Require specific permission or die
+ */
+function require_permission(array $user, string $permission): void {
+    if (!has_permission($user, $permission)) {
+        http_response_code(403);
+        if (defined('AJAX_REQUEST')) {
+            header('Content-Type: application/json');
+            echo json_encode(['success' => false, 'error' => 'Ingen tilladelse']);
+        } else {
+            die('Ingen tilladelse til denne handling');
+        }
+        exit;
+    }
+}
+
+// ============================================================================
+// IMAGE PROCESSING
+// ============================================================================
+
+/**
+ * Process uploaded image (resize, optimize)
+ */
+function process_image(string $filepath): bool {
+    if (!file_exists($filepath)) return false;
+
+    $imageInfo = getimagesize($filepath);
+    if (!$imageInfo) return false;
+
+    [$width, $height, $type] = $imageInfo;
+
+    // Load image based on type
+    $image = match($type) {
+        IMAGETYPE_JPEG => imagecreatefromjpeg($filepath),
+        IMAGETYPE_PNG => imagecreatefrompng($filepath),
+        IMAGETYPE_GIF => imagecreatefromgif($filepath),
+        IMAGETYPE_WEBP => imagecreatefromwebp($filepath),
+        default => null
+    };
+
+    if (!$image) return false;
+
+    // Resize if too large (max 1920px width)
+    $maxWidth = 1920;
+    if ($width > $maxWidth) {
+        $newHeight = ($height / $width) * $maxWidth;
+        $resized = imagecreatetruecolor($maxWidth, $newHeight);
+        
+        // Preserve transparency for PNG
+        if ($type === IMAGETYPE_PNG) {
+            imagealphablending($resized, false);
+            imagesavealpha($resized, true);
+        }
+
+        imagecopyresampled($resized, $image, 0, 0, 0, 0, $maxWidth, $newHeight, $width, $height);
+        $image = $resized;
+    }
+
+    // Create thumbnail (300px width)
+    $thumbWidth = 300;
+    $thumbHeight = ($height / $width) * $thumbWidth;
+    $thumbnail = imagecreatetruecolor($thumbWidth, $thumbHeight);
+
+    if ($type === IMAGETYPE_PNG) {
+        imagealphablending($thumbnail, false);
+        imagesavealpha($thumbnail, true);
+    }
+
+    imagecopyresampled($thumbnail, $image, 0, 0, 0, 0, $thumbWidth, $thumbHeight, imagesx($image), imagesy($image));
+
+    // Save optimized images
+    $dir = dirname($filepath);
+    $filename = basename($filepath);
+
+    match($type) {
+        IMAGETYPE_JPEG => [
+            imagejpeg($image, $filepath, 85),
+            imagejpeg($thumbnail, $dir . '/thumb_' . $filename, 85)
+        ],
+        IMAGETYPE_PNG => [
+            imagepng($image, $filepath, 8),
+            imagepng($thumbnail, $dir . '/thumb_' . $filename, 8)
+        ],
+        IMAGETYPE_WEBP => [
+            imagewebp($image, $filepath, 85),
+            imagewebp($thumbnail, $dir . '/thumb_' . $filename, 85)
+        ],
+        default => null
+    };
+
+    imagedestroy($image);
+    imagedestroy($thumbnail);
+
+    return true;
+}
+
+/**
+ * Get image URL
+ */
+function get_image_url(?int $projectId, string $filename): string {
+    if ($projectId) {
+        return BASE_URL . '/projects/' . $projectId . '/uploads/' . $filename;
+    }
+    return BASE_URL . '/uploads/general/' . $filename;
+}
+
+/**
+ * Get image physical path
+ */
+function get_image_path(?int $projectId, string $filename): string {
+    if ($projectId) {
+        return get_project_dir($projectId) . '/uploads/' . $filename;
+    }
+    return UPLOADS_DIR . '/general/' . $filename;
+}
+
+// ============================================================================
+// HELPER FUNCTIONS
+// ============================================================================
+
+/**
+ * Recursive directory copy
+ */
+function recursive_copy(string $source, string $dest): bool {
+    if (!is_dir($source)) return false;
+
+    ensure_dir($dest);
+
+    $dir = opendir($source);
+    while (($file = readdir($dir)) !== false) {
+        if ($file === '.' || $file === '..') continue;
+
+        $srcPath = $source . '/' . $file;
+        $destPath = $dest . '/' . $file;
+
+        if (is_dir($srcPath)) {
+            recursive_copy($srcPath, $destPath);
+        } else {
+            copy($srcPath, $destPath);
+        }
+    }
+    closedir($dir);
+
+    return true;
+}
+
+/**
+ * Database transaction helpers
+ */
+function db_begin_transaction(): void {
+    db()->beginTransaction();
+}
+
+function db_commit(): void {
+    db()->commit();
+}
+
+function db_rollback(): void {
+    db()->rollBack();
+}
+
+/**
+ * Get single value from database
+ */
+function db_value(string $sql, array $params = []) {
+    $result = db_fetch($sql, $params);
+    return $result ? array_values($result)[0] : null;
+}
+
+/**
+ * Log activity
+ */
+function log_activity(string $action, string $entity_type, int $entity_id): void {
+    if (!is_logged_in()) return;
+
+    $user = current_user();
+    
+    db_insert('activity_log', [
+        'user_id' => $user['id'],
+        'action' => $action,
+        'entity_type' => $entity_type,
+        'entity_id' => $entity_id,
+        'ip_address' => $_SERVER['REMOTE_ADDR'] ?? '',
+        'user_agent' => $_SERVER['HTTP_USER_AGENT'] ?? '',
+        'created_at' => date('Y-m-d H:i:s')
+    ]);
+}
+
+/**
+ * Log error
+ */
+function log_error(string $message): void {
+    error_log('[DueDiligence] ' . $message);
+    
+    db_insert('error_log', [
+        'message' => $message,
+        'user_id' => is_logged_in() ? current_user()['id'] : null,
+        'url' => $_SERVER['REQUEST_URI'] ?? '',
+        'created_at' => date('Y-m-d H:i:s')
+    ]);
+}
+
+/**
+ * Get project directory
+ */
+function get_project_dir(int $projectId): string {
+    return PROJECTS_DIR . '/' . $projectId;
+}
+
+/**
+ * Ensure directory exists
+ */
+function ensure_dir(string $path): void {
+    if (!is_dir($path)) {
+        mkdir($path, 0755, true);
+    }
+}

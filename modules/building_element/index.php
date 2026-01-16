@@ -165,7 +165,7 @@ $elements = db_query("
     LEFT JOIN building_elements p ON be.parent_id = p.id
     LEFT JOIN price_catalogs pc ON be.price_catalog_id = pc.id
     $where
-    ORDER BY b.name, be.name
+    ORDER BY b.name, COALESCE(be.sort_order, 999999), be.name
     LIMIT :limit OFFSET :offset
 ", array_merge($params, ['limit' => $perPage, 'offset' => $offset]));
 
@@ -185,4 +185,6 @@ if (isset($_GET['error'])) {
     $errorMessage = $_GET['error'];
 }
 
-load_template(template_path('building_element', 'template'), compact('elements', 'totalElements', 'page', 'totalPages', 'searchTerm', 'buildingId', 'successMessage', 'errorMessage'));
+$permissions = get_user_permissions(current_user()['id']);
+
+load_template(template_path('building_element', 'template'), compact('elements', 'totalElements', 'page', 'totalPages', 'searchTerm', 'buildingId', 'successMessage', 'errorMessage', 'permissions'));

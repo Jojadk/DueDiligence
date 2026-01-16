@@ -1,71 +1,271 @@
-<?php /* Dashboard */ ?>
+<?php /* Dashboard - Backend-Controlled Widgets */ ?>
 
 <header class="page-header">
     <div><h1><?= icon('home', 32) ?> Dashboard</h1><p class="subtitle">Oversigt over dit system</p></div>
+    <?php if ($permissions['admin']): ?>
+    <button class="btn btn-secondary" onclick="DashboardModule.refreshWidgets()"><?= icon('refresh-cw', 20) ?> Opdater</button>
+    <?php endif; ?>
 </header>
 
-<div class="stats-grid">
-    <div class="stat-card"><div class="stat-icon"><?= icon('users', 32) ?></div><div class="stat-info"><div class="stat-value"><?= number_format($stats['customers'], 0, ',', '.') ?></div><div class="stat-label">Kunder</div></div><a href="#" onclick="navigate('customer'); return false;" class="stat-link">Se alle →</a></div>
-    <div class="stat-card"><div class="stat-icon"><?= icon('folder', 32) ?></div><div class="stat-info"><div class="stat-value"><?= number_format($stats['projects'], 0, ',', '.') ?></div><div class="stat-label">Projekter</div></div><a href="#" onclick="navigate('project'); return false;" class="stat-link">Se alle →</a></div>
-    <div class="stat-card"><div class="stat-icon"><?= icon('building', 32) ?></div><div class="stat-info"><div class="stat-value"><?= number_format($stats['buildings'], 0, ',', '.') ?></div><div class="stat-label">Bygninger</div></div><a href="#" onclick="navigate('building'); return false;" class="stat-link">Se alle →</a></div>
-    <div class="stat-card"><div class="stat-icon"><?= icon('list', 32) ?></div><div class="stat-info"><div class="stat-value"><?= number_format($stats['elements'], 0, ',', '.') ?></div><div class="stat-label">Bygningsdele</div></div><a href="#" onclick="navigate('building_element'); return false;" class="stat-link">Se alle →</a></div>
+<!-- Stats Grid (loaded via API) -->
+<div id="statsGrid" class="stats-grid">
+    <div class="loading-card"><div class="spinner-small"></div> Indlæser statistik...</div>
 </div>
 
-<div class="dashboard-row">
-    <div class="dashboard-card">
-        <h2><?= icon('clock', 24) ?> Seneste Projekter</h2>
-        <?php if (empty($recentProjects)): ?>
-        <p class="text-muted">Ingen projekter endnu</p>
-        <?php else: ?>
-        <div class="list-group">
-            <?php foreach ($recentProjects as $p): 
-            $statusMap = ['planning'=>'Planlægning','active'=>'Aktiv','on_hold'=>'På vent','completed'=>'Afsluttet','archived'=>'Arkiveret'];
-            $statusClass = ['planning'=>'badge-warning','active'=>'badge-success','on_hold'=>'badge-secondary','completed'=>'badge-info','archived'=>'badge-muted'];
-            ?>
-            <a href="#" onclick="navigate('project', {id: <?= $p['id'] ?>}); return false;" class="list-item">
-                <div><strong><?= esc_html($p['name']) ?></strong><small class="text-muted"><?= esc_html($p['customer_name']) ?></small></div>
-                <span class="badge <?= $statusClass[$p['status']??'badge-secondary'] ?>"><?= $statusMap[$p['status']]??$p['status'] ?></span>
-            </a>
-            <?php endforeach; ?>
-        </div>
-        <?php endif; ?>
-    </div>
+<!-- Widgets Grid (backend-controlled) -->
+<div id="widgetsGrid" class="dashboard-row">
+    <div class="loading-card"><div class="spinner-small"></div> Indlæser widgets...</div>
+</div>
 
-    <div class="dashboard-card">
-        <h2><?= icon('alert', 24) ?> Hastende Bygningsdele</h2>
-        <?php if (empty($urgentElements)): ?>
-        <p class="text-muted">Ingen hastende elementer</p>
-        <?php else: ?>
-        <div class="list-group">
-            <?php foreach ($urgentElements as $e): 
-            $urgencyMap = ['high'=>'Høj','critical'=>'Kritisk'];
-            $urgencyClass = ['high'=>'badge-warning','critical'=>'badge-error'];
-            ?>
-            <a href="#" onclick="navigate('building_element', {id: <?= $e['id'] ?>}); return false;" class="list-item">
-                <div><strong><?= esc_html($e['name']) ?></strong><small class="text-muted"><?= esc_html($e['building_name']) ?> • <?= $e['time_horizon'] ?> år</small></div>
-                <span class="badge <?= $urgencyClass[$e['urgency']] ?>"><?= $urgencyMap[$e['urgency']] ?></span>
-            </a>
-            <?php endforeach; ?>
-        </div>
-        <?php endif; ?>
+<!-- Admin-only widgets (if user has permission) -->
+<?php if ($permissions['admin']): ?>
+<div id="adminWidgets" class="admin-section">
+    <h2><?= icon('shield', 24) ?> Administration</h2>
+    <div id="adminContent" class="dashboard-row">
+        <div class="loading-card"><div class="spinner-small"></div> Indlæser admin data...</div>
     </div>
 </div>
+<?php endif; ?>
+
+<script>
+const DashboardModule = {
+    permissions: <?= json_encode($permissions) ?>,
+    
+    async init() {
+        await this.loadStats();
+        await this.loadWidgets();
+        
+        // Auto-refresh every 5 minutes
+        setInterval(() => this.refreshWidgets(), 300000);
+    },
+
+    async loadStats() {
+        try {
+            const response = await API.get('/api.php', { action: 'get_dashboard_stats' });
+            
+            if (response.success) {
+                this.renderStats(response.stats);
+            } else {
+                Toast.error('Kunne ikke hente statistik');
+            }
+        } catch (error) {
+            console.error('Stats load error:', error);
+            document.getElementById('statsGrid').innerHTML = '<div class="error-card">Fejl ved indlæsning</div>';
+        }
+    },
+
+    renderStats(stats) {
+        const grid = document.getElementById('statsGrid');
+        
+        const statCards = [
+            { icon: 'users', label: 'Kunder', value: stats.customers, link: 'customer', show: this.permissions.view_customers },
+            { icon: 'folder', label: 'Projekter', value: stats.projects, link: 'project', show: true },
+            { icon: 'building', label: 'Bygninger', value: stats.buildings, link: 'building', show: true },
+            { icon: 'list', label: 'Bygningsdele', value: stats.elements, link: 'building_element', show: true },
+            { icon: 'activity', label: 'Aktive Projekter', value: stats.active_projects, link: 'project', show: true },
+            { icon: 'alert-triangle', label: 'Hastende', value: stats.urgent_items, link: 'building_element', show: true },
+            { icon: 'dollar-sign', label: 'Total CAPEX', value: formatMoney(stats.total_capex), link: null, show: this.permissions.view_reports }
+        ].filter(card => card.show);
+
+        grid.innerHTML = statCards.map(card => `
+            <div class="stat-card ${card.link ? 'clickable' : ''}" ${card.link ? `onclick="navigate('${card.link}')"` : ''}>
+                <div class="stat-icon">${this.getIcon(card.icon, 32)}</div>
+                <div class="stat-info">
+                    <div class="stat-value">${escapeHtml(card.value.toString())}</div>
+                    <div class="stat-label">${escapeHtml(card.label)}</div>
+                </div>
+                ${card.link ? '<div class="stat-arrow">→</div>' : ''}
+            </div>
+        `).join('');
+    },
+
+    async loadWidgets() {
+        try {
+            const response = await API.get('/api.php', { action: 'get_dashboard_widgets' });
+            
+            if (response.success) {
+                this.renderWidgets(response.widgets);
+            } else {
+                Toast.error('Kunne ikke hente widgets');
+            }
+        } catch (error) {
+            console.error('Widgets load error:', error);
+            document.getElementById('widgetsGrid').innerHTML = '<div class="error-card">Fejl ved indlæsning</div>';
+        }
+    },
+
+    renderWidgets(widgets) {
+        const grid = document.getElementById('widgetsGrid');
+        
+        let html = '';
+
+        // Recent Projects
+        if (widgets.recent_projects) {
+            html += `
+                <div class="dashboard-card">
+                    <h2>${this.getIcon('clock', 24)} Seneste Projekter</h2>
+                    ${widgets.recent_projects.length === 0 ? 
+                        '<p class="text-muted">Ingen projekter endnu</p>' :
+                        `<div class="list-group">${widgets.recent_projects.map(p => this.renderProjectItem(p)).join('')}</div>`
+                    }
+                </div>
+            `;
+        }
+
+        // Urgent Elements
+        if (widgets.urgent_elements) {
+            html += `
+                <div class="dashboard-card">
+                    <h2>${this.getIcon('alert-triangle', 24)} Hastende Bygningsdele</h2>
+                    ${widgets.urgent_elements.length === 0 ?
+                        '<p class="text-muted">Ingen hastende elementer</p>' :
+                        `<div class="list-group">${widgets.urgent_elements.map(e => this.renderElementItem(e)).join('')}</div>`
+                    }
+                </div>
+            `;
+        }
+
+        grid.innerHTML = html;
+
+        // Admin widgets (if user is admin)
+        if (this.permissions.admin && widgets.recent_users) {
+            const adminGrid = document.getElementById('adminContent');
+            if (adminGrid) {
+                let adminHtml = `
+                    <div class="dashboard-card">
+                        <h2>${this.getIcon('users', 24)} Seneste Brugere</h2>
+                        <div class="list-group">
+                            ${widgets.recent_users.map(u => `
+                                <div class="list-item">
+                                    <div>
+                                        <strong>${escapeHtml(u.name)}</strong>
+                                        <small class="text-muted">${escapeHtml(u.email)}</small>
+                                    </div>
+                                    <small>${formatDate(u.created_at)}</small>
+                                </div>
+                            `).join('')}
+                        </div>
+                    </div>
+                `;
+
+                if (widgets.system_health) {
+                    adminHtml += `
+                        <div class="dashboard-card">
+                            <h2>${this.getIcon('cpu', 24)} System Status</h2>
+                            <div class="health-stats">
+                                <div class="health-item">
+                                    <span>Database:</span>
+                                    <span>${formatFileSize(widgets.system_health.database_size)}</span>
+                                </div>
+                                <div class="health-item">
+                                    <span>Records:</span>
+                                    <span>${widgets.system_health.total_records.toLocaleString('da-DK')}</span>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                }
+
+                adminGrid.innerHTML = adminHtml;
+            }
+        }
+    },
+
+    renderProjectItem(project) {
+        const statusMap = {
+            'planning': { label: 'Planlægning', class: 'badge-warning' },
+            'active': { label: 'Aktiv', class: 'badge-success' },
+            'on_hold': { label: 'På vent', class: 'badge-secondary' },
+            'completed': { label: 'Afsluttet', class: 'badge-info' },
+            'archived': { label: 'Arkiveret', class: 'badge-muted' }
+        };
+
+        const status = statusMap[project.status] || statusMap.planning;
+
+        return `
+            <a href="#" onclick="navigate('project', {id: ${project.id}}); return false;" class="list-item">
+                <div>
+                    <strong>${escapeHtml(project.name)}</strong>
+                    <small class="text-muted">${escapeHtml(project.customer_name || '')}</small>
+                </div>
+                <span class="badge ${status.class}">${status.label}</span>
+            </a>
+        `;
+    },
+
+    renderElementItem(element) {
+        const urgencyMap = {
+            'high': { label: 'Høj', class: 'badge-warning' },
+            'critical': { label: 'Kritisk', class: 'badge-error' }
+        };
+
+        const urgency = urgencyMap[element.urgency] || urgencyMap.high;
+
+        return `
+            <a href="#" onclick="navigate('building_element', {id: ${element.id}}); return false;" class="list-item">
+                <div>
+                    <strong>${escapeHtml(element.name)}</strong>
+                    <small class="text-muted">${escapeHtml(element.building_name)} • ${element.time_horizon} år</small>
+                </div>
+                <span class="badge ${urgency.class}">${urgency.label}</span>
+            </a>
+        `;
+    },
+
+    getIcon(name, size) {
+        // Simplified - use actual icon() function from backend
+        return `<svg width="${size}" height="${size}"><use href="#icon-${name}"></use></svg>`;
+    },
+
+    async refreshWidgets() {
+        App.showLoading('Opdaterer dashboard...');
+        await this.loadStats();
+        await this.loadWidgets();
+        App.hideLoading();
+        Toast.success('Dashboard opdateret');
+    }
+};
+
+// Initialize when template loads
+DashboardModule.init();
+</script>
 
 <style>
+.page-header {display: flex; align-items: center; justify-content: space-between; margin-bottom: 32px;}
+.page-header h1 {display: flex; align-items: center; gap: 12px; font-size: 30px; font-weight: 700; margin: 0;}
+.subtitle {color: var(--color-gray-600); font-size: 14px;}
+
 .stats-grid {display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 24px; margin-bottom: 32px;}
-.stat-card {background: white; border-radius: 8px; padding: 24px; border: 1px solid var(--color-gray-200); display: flex; flex-direction: column; gap: 16px;}
-.stat-card .stat-icon {color: var(--color-primary);}
+
+.stat-card {background: white; border-radius: 8px; padding: 24px; border: 1px solid var(--color-gray-200); display: flex; gap: 16px; align-items: center; transition: all 0.2s;}
+.stat-card.clickable {cursor: pointer;}
+.stat-card.clickable:hover {transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,0,0,0.1);}
+
+.stat-icon {color: var(--color-primary); flex-shrink: 0;}
 .stat-info {flex: 1;}
-.stat-value {font-size: 32px; font-weight: 700; color: var(--color-gray-900);}
-.stat-label {font-size: 14px; color: var(--color-gray-600);}
-.stat-link {color: var(--color-primary); font-size: 14px; text-decoration: none;}
-.stat-link:hover {text-decoration: underline;}
-.dashboard-row {display: grid; grid-template-columns: repeat(auto-fit, minmax(400px, 1fr)); gap: 24px;}
+.stat-value {font-size: 32px; font-weight: 700; color: var(--color-gray-900); line-height: 1;}
+.stat-label {font-size: 14px; color: var(--color-gray-600); margin-top: 4px;}
+.stat-arrow {font-size: 24px; color: var(--color-primary); opacity: 0; transition: opacity 0.2s;}
+.stat-card.clickable:hover .stat-arrow {opacity: 1;}
+
+.dashboard-row {display: grid; grid-template-columns: repeat(auto-fit, minmax(400px, 1fr)); gap: 24px; margin-bottom: 32px;}
+
 .dashboard-card {background: white; border-radius: 8px; padding: 24px; border: 1px solid var(--color-gray-200);}
-.dashboard-card h2 {display: flex; align-items: center; gap: 12px; font-size: 18px; font-weight: 600; margin-bottom: 16px;}
+.dashboard-card h2 {display: flex; align-items: center; gap: 12px; font-size: 18px; font-weight: 600; margin-bottom: 16px; color: var(--color-gray-900);}
+
 .list-group {display: flex; flex-direction: column; gap: 8px;}
 .list-item {display: flex; align-items: center; justify-content: space-between; padding: 12px; background: var(--color-gray-50); border-radius: 6px; text-decoration: none; color: inherit; transition: background 0.15s;}
 .list-item:hover {background: var(--color-gray-100);}
 .list-item strong {display: block; font-weight: 600; margin-bottom: 4px;}
 .list-item small {display: block; font-size: 12px;}
+
+.admin-section {margin-top: 48px; padding-top: 32px; border-top: 2px solid var(--color-gray-200);}
+.admin-section h2 {display: flex; align-items: center; gap: 12px; font-size: 20px; font-weight: 600; margin-bottom: 24px;}
+
+.health-stats {display: flex; flex-direction: column; gap: 12px;}
+.health-item {display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid var(--color-gray-100);}
+.health-item:last-child {border-bottom: none;}
+
+.loading-card, .error-card {background: white; border-radius: 8px; padding: 48px 24px; text-align: center; border: 1px solid var(--color-gray-200); color: var(--color-gray-500);}
+.error-card {color: var(--color-error);}
 </style>
