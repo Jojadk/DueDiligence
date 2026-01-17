@@ -393,11 +393,14 @@ const ImageUpload = {
             return;
         }
 
-        let html = '<div class="image-gallery">';
+        let html = '<div class="image-gallery" id="imageGallery-' + entityType + '-' + entityId + '">';
 
         images.forEach(img => {
             html += `
-                <div class="gallery-item" data-image-id="${img.id}">
+                <div class="gallery-item" data-image-id="${img.id}" draggable="true">
+                    <div class="image-drag-handle" title="Træk for at ændre rækkefølge">
+                        ${this.getIcon('menu', 14)}
+                    </div>
                     <img src="${escapeHtml(img.thumbnail_path || img.file_path)}"
                          alt="${escapeHtml(img.description || '')}"
                          onclick="ImageUpload.viewImage('${escapeHtml(img.file_path)}', '${escapeHtml(img.description || '')}')">
@@ -424,6 +427,93 @@ const ImageUpload = {
         `;
 
         container.innerHTML = html;
+
+        // Initialize drag-and-drop for image sorting
+        setTimeout(() => {
+            this.initImageDragDrop(entityType, entityId);
+        }, 100);
+    },
+
+    /**
+     * Initialize drag-and-drop for image gallery
+     */
+    initImageDragDrop(entityType, entityId) {
+        const gallery = document.getElementById('imageGallery-' + entityType + '-' + entityId);
+        if (!gallery) return;
+
+        const items = gallery.querySelectorAll('.gallery-item');
+        let draggedItem = null;
+
+        items.forEach(item => {
+            item.addEventListener('dragstart', (e) => {
+                draggedItem = item;
+                item.classList.add('dragging');
+            });
+
+            item.addEventListener('dragend', (e) => {
+                item.classList.remove('dragging');
+                this.saveImageOrder(entityType, entityId);
+            });
+
+            item.addEventListener('dragover', (e) => {
+                e.preventDefault();
+                const afterElement = this.getDragAfterImageElement(gallery, e.clientX, e.clientY);
+                if (afterElement == null) {
+                    gallery.appendChild(draggedItem);
+                } else {
+                    gallery.insertBefore(draggedItem, afterElement);
+                }
+            });
+        });
+    },
+
+    /**
+     * Get element after drag position for grid layout
+     */
+    getDragAfterImageElement(container, x, y) {
+        const draggableElements = [...container.querySelectorAll('.gallery-item:not(.dragging)')];
+
+        return draggableElements.reduce((closest, child) => {
+            const box = child.getBoundingClientRect();
+            const offsetX = x - box.left - box.width / 2;
+            const offsetY = y - box.top - box.height / 2;
+            const offset = Math.sqrt(offsetX * offsetX + offsetY * offsetY);
+
+            if (offset < closest.offset) {
+                return { offset: offset, element: child };
+            } else {
+                return closest;
+            }
+        }, { offset: Number.POSITIVE_INFINITY }).element;
+    },
+
+    /**
+     * Save new image order to backend
+     */
+    async saveImageOrder(entityType, entityId) {
+        const gallery = document.getElementById('imageGallery-' + entityType + '-' + entityId);
+        if (!gallery) return;
+
+        const imageIds = [...gallery.querySelectorAll('.gallery-item')].map(item => item.dataset.imageId);
+
+        try {
+            const formData = new FormData();
+            formData.append('action', 'update_image_order');
+            formData.append('entity_type', entityType);
+            formData.append('entity_id', entityId);
+            formData.append('image_ids', JSON.stringify(imageIds));
+
+            const response = await API.post('/api.php', formData, true);
+
+            if (response.success) {
+                Toast.success('Billede rækkefølge opdateret');
+            } else {
+                Toast.error(response.error || 'Kunne ikke opdatere rækkefølge');
+            }
+        } catch (error) {
+            console.error('Image order save error:', error);
+            Toast.error('Netværksfejl ved opdatering');
+        }
     },
 
     /**

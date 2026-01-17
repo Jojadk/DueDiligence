@@ -101,11 +101,45 @@
     overflow: hidden;
     background: white;
     transition: transform 0.2s ease, box-shadow 0.2s ease;
+    cursor: grab;
+}
+
+.gallery-item:active {
+    cursor: grabbing;
+}
+
+.gallery-item.dragging {
+    opacity: 0.5;
+    transform: scale(0.95);
 }
 
 .gallery-item:hover {
     transform: translateY(-2px);
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+/* Image Drag Handle */
+.image-drag-handle {
+    position: absolute;
+    top: 8px;
+    left: 8px;
+    background: rgba(255, 255, 255, 0.95);
+    backdrop-filter: blur(4px);
+    padding: 6px;
+    border-radius: 4px;
+    cursor: move;
+    opacity: 0;
+    transition: opacity 0.2s ease;
+    z-index: 2;
+    color: var(--color-gray-600);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+}
+
+.gallery-item:hover .image-drag-handle {
+    opacity: 1;
 }
 
 .gallery-item img {

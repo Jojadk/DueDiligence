@@ -59,6 +59,11 @@ try {
             echo json_encode(updateOrder($currentUser));
             break;
 
+        case 'update_image_order':
+            csrf_require();
+            echo json_encode(updateImageOrder($currentUser));
+            break;
+
         // Project Snapshots (admin or project owner only)
         case 'create_snapshot':
             csrf_require();
@@ -355,7 +360,7 @@ function getImages(array $user): array {
 
     $whereClause = !empty($where) ? 'WHERE ' . implode(' AND ', $where) : '';
 
-    $images = db_query("SELECT * FROM images $whereClause ORDER BY created_at DESC", $params);
+    $images = db_query("SELECT * FROM images $whereClause ORDER BY COALESCE(sort_order, 999999), created_at DESC", $params);
 
     // Add URLs
     foreach ($images as &$img) {
@@ -397,6 +402,58 @@ function updateOrder(array $user): array {
         return ['success' => true];
     } catch (Exception $e) {
         db_rollback();
+        return ['success' => false, 'error' => 'Kunne ikke opdatere rækkefølge'];
+    }
+}
+
+function updateImageOrder(array $user): array {
+    if (!has_permission($user, 'upload_images')) {
+        return ['success' => false, 'error' => 'Ingen tilladelse'];
+    }
+
+    $imageIds = json_decode($_POST['image_ids'] ?? '[]', true);
+    $entityType = sanitize_string($_POST['entity_type'] ?? '');
+    $entityId = sanitize_int($_POST['entity_id'] ?? 0);
+
+    if (empty($imageIds) || !$entityType || !$entityId) {
+        return ['success' => false, 'error' => 'Manglende parametre'];
+    }
+
+    // Verify ownership based on entity type
+    if (!has_permission($user, 'admin')) {
+        $ownershipQuery = match($entityType) {
+            'project' => "SELECT user_id FROM projects WHERE id = :id",
+            'building' => "SELECT p.user_id FROM projects p JOIN buildings b ON p.id = b.project_id WHERE b.id = :id",
+            'building_element' => "SELECT p.user_id FROM projects p JOIN buildings b ON p.id = b.project_id JOIN building_elements be ON b.id = be.building_id WHERE be.id = :id",
+            default => null
+        };
+
+        if (!$ownershipQuery) {
+            return ['success' => false, 'error' => 'Ugyldig entity type'];
+        }
+
+        $owner = db_fetch($ownershipQuery, ['id' => $entityId]);
+        if (!$owner || $owner['user_id'] != $user['id']) {
+            return ['success' => false, 'error' => 'Ingen adgang'];
+        }
+    }
+
+    // Update sort orders in transaction
+    db_begin_transaction();
+    try {
+        foreach ($imageIds as $index => $imageId) {
+            db_update('images', ['sort_order' => $index], 'id = :id AND entity_type = :type AND entity_id = :eid', [
+                'id' => sanitize_int($imageId),
+                'type' => $entityType,
+                'eid' => $entityId
+            ]);
+        }
+        db_commit();
+        log_activity('images_reordered', $entityType, $entityId);
+        return ['success' => true];
+    } catch (Exception $e) {
+        db_rollback();
+        log_error('Image order update error: ' . $e->getMessage());
         return ['success' => false, 'error' => 'Kunne ikke opdatere rækkefølge'];
     }
 }
