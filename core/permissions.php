@@ -162,8 +162,8 @@ function get_accessible_projects(array $user, string $minLevel = 'viewer'): arra
 function get_user_groups(int $userId): array {
     return db_fetch_all("
         SELECT g.*
-        FROM groups g
-        JOIN user_groups ug ON g.id = ug.group_id
+        FROM permission_groups g
+        JOIN permission_user_groups ug ON g.id = ug.group_id
         WHERE ug.user_id = :user_id
         AND g.is_active = true
         ORDER BY g.name
@@ -204,8 +204,8 @@ function grant_user_permission(int $userId, string $module, string $permission, 
     // Get permission ID
     $permissionId = db_value("
         SELECT p.id
-        FROM permissions p
-        JOIN modules m ON p.module_id = m.id
+        FROM permission_permissions p
+        JOIN permission_modules m ON p.module_id = m.id
         WHERE m.module_key = :module_key
         AND p.permission_key = :permission_key
     ", ['module_key' => $module, 'permission_key' => $permission]);
@@ -216,7 +216,7 @@ function grant_user_permission(int $userId, string $module, string $permission, 
 
     // Insert or update user permission
     db_query("
-        INSERT INTO user_permissions (user_id, permission_id, granted, created_by)
+        INSERT INTO permission_user_permissions (user_id, permission_id, granted, created_by)
         VALUES (:user_id, :permission_id, true, :created_by)
         ON CONFLICT (user_id, permission_id)
         DO UPDATE SET granted = true, created_by = :created_by
@@ -243,8 +243,8 @@ function grant_user_permission(int $userId, string $module, string $permission, 
 function revoke_user_permission(int $userId, string $module, string $permission, int $revokedBy): bool {
     $permissionId = db_value("
         SELECT p.id
-        FROM permissions p
-        JOIN modules m ON p.module_id = m.id
+        FROM permission_permissions p
+        JOIN permission_modules m ON p.module_id = m.id
         WHERE m.module_key = :module_key
         AND p.permission_key = :permission_key
     ", ['module_key' => $module, 'permission_key' => $permission]);
@@ -254,7 +254,7 @@ function revoke_user_permission(int $userId, string $module, string $permission,
     }
 
     db_query("
-        INSERT INTO user_permissions (user_id, permission_id, granted, created_by)
+        INSERT INTO permission_user_permissions (user_id, permission_id, granted, created_by)
         VALUES (:user_id, :permission_id, false, :created_by)
         ON CONFLICT (user_id, permission_id)
         DO UPDATE SET granted = false, created_by = :created_by
@@ -344,7 +344,7 @@ function revoke_project_access(int $projectId, string $entityType, int $entityId
  */
 function add_user_to_group(int $userId, int $groupId, int $assignedBy): bool {
     try {
-        db_insert('user_groups', [
+        db_insert('permission_user_groups', [
             'user_id' => $userId,
             'group_id' => $groupId,
             'assigned_by' => $assignedBy
@@ -370,7 +370,7 @@ function add_user_to_group(int $userId, int $groupId, int $assignedBy): bool {
  */
 function remove_user_from_group(int $userId, int $groupId): bool {
     db_query("
-        DELETE FROM user_groups
+        DELETE FROM permission_user_groups
         WHERE user_id = :user_id AND group_id = :group_id
     ", ['user_id' => $userId, 'group_id' => $groupId]);
 
@@ -392,8 +392,8 @@ function remove_user_from_group(int $userId, int $groupId): bool {
 function log_permission_check(int $userId, string $module, string $permission, bool $granted): void {
     $permissionId = db_value("
         SELECT p.id
-        FROM permissions p
-        JOIN modules m ON p.module_id = m.id
+        FROM permission_permissions p
+        JOIN permission_modules m ON p.module_id = m.id
         WHERE m.module_key = :module_key
         AND p.permission_key = :permission_key
     ", ['module_key' => $module, 'permission_key' => $permission]);
@@ -422,8 +422,8 @@ function log_permission_check(int $userId, string $module, string $permission, b
 function log_permission_change(int $userId, string $action, string $module, string $permission, int $changedBy): void {
     $permissionId = db_value("
         SELECT p.id
-        FROM permissions p
-        JOIN modules m ON p.module_id = m.id
+        FROM permission_permissions p
+        JOIN permission_modules m ON p.module_id = m.id
         WHERE m.module_key = :module_key
         AND p.permission_key = :permission_key
     ", ['module_key' => $module, 'permission_key' => $permission]);

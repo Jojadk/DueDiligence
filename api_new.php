@@ -52,7 +52,7 @@ if (!preg_match('/^[a-z_]+$/', $action)) {
 // Check if module exists and is active
 $moduleInfo = db_fetch("
     SELECT id, module_key, display_name, is_active
-    FROM modules
+    FROM permission_modules
     WHERE module_key = :module_key
 ", ['module_key' => $module]);
 
