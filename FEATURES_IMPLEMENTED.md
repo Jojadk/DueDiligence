@@ -794,3 +794,229 @@ User can focus on highest priority items first
 - [ ] Test summary statistics accuracy
 - [ ] Test red flags with multiple flags on same element
 - [ ] Test empty state when no red flags exist
+
+## 12. Comprehensive Report Generator with CAPEX/OPEX/TCO Summary Tables ✅
+
+**Location:**
+- `modules/report/index.php` - Report module controller
+- `modules/report/template.tpl` - Report template with all summaries
+
+### Features:
+Comprehensive project reporting with executive summaries, financial breakdowns, and detailed hierarchies. Print-friendly and designed for client presentations.
+
+### Report Sections:
+
+#### 1. Executive Summary
+High-level overview with key metrics:
+- **Total CAPEX** - Sum of all building elements with contingency margin
+- **OPEX per år** - Annual operational expenses with lifecycle projection
+- **Total Cost of Ownership** - Combined CAPEX + OPEX NPV
+- **Kritiske elementer** - Count and value of urgent items
+
+Includes narrative summary explaining:
+- Total project costs breakdown
+- Critical items requiring attention
+- Operational cost projections
+- CAPEX vs OPEX distribution
+
+#### 2. Red Flags Summary
+Table showing critical issues:
+- Kritisk prioritet (critical urgency items)
+- Høj prioritet (high urgency items)
+- Dårlig tilstand (poor condition items)
+- Høje omkostninger (high cost items >500k)
+- Data quality metrics (missing descriptions, quantities)
+
+Each row shows count and total CAPEX affected.
+
+#### 3. CAPEX Summary by Building
+Table with columns:
+- Bygning (building name)
+- Antal elementer (element count)
+- Total CAPEX (sum of all elements)
+- % af total (percentage of project total)
+
+Footer shows project totals.
+Sorted by building name.
+
+#### 4. CAPEX Summary by Category
+Table aggregating all elements by category across all buildings:
+- Kategori (element category)
+- Antal elementer (count)
+- Total CAPEX (sum)
+- % af total (percentage)
+
+Sorted by CAPEX (highest first).
+Shows which categories consume most budget.
+
+#### 5. OPEX Summary by Building
+Table showing operational costs per building:
+- Bygning (building name)
+- Areal (m²) (building area)
+- OPEX per år (annual operational cost)
+- OPEX per m² (cost efficiency metric)
+- OPEX over lifecycle (total over e.g., 30 years)
+
+Footer shows project-wide OPEX totals.
+Allows comparison of operational efficiency between buildings.
+
+#### 6. Total Cost of Ownership (TCO) Summary
+Detailed breakdown table:
+- **CAPEX (basis)** - Raw CAPEX total
+- **CAPEX sikkerhedsmargin** - Contingency buffer (e.g., 10%)
+- **CAPEX med sikkerhedsmargin** - CAPEX with contingency
+- **OPEX per år** - Annual operational expense
+- **OPEX NPV** - Net Present Value of OPEX over lifecycle
+
+Shows percentage contribution of each component to total TCO.
+
+**TCO Configuration section:**
+- Beregningsperiode (lifecycle years, e.g., 30)
+- Diskonteringsrente (discount rate, e.g., 3%)
+- CAPEX sikkerhedsmargin (contingency, e.g., 10%)
+- OPEX eskalering (annual escalation, e.g., 2.5%)
+
+**Fordeling (Distribution):**
+- CAPEX % of TCO
+- OPEX % of TCO
+
+#### 7. Detaljeret Hierarki (Detailed Hierarchy)
+Nested tree structure showing:
+- Buildings at top level
+- Elements organized by parent-child relationships
+- Each item shows:
+  - Name and category badge
+  - Urgency badge (if critical/high)
+  - Quantity and unit
+  - CAPEX value
+
+Visual indentation shows hierarchy depth.
+Print-friendly format.
+
+### Data Loading:
+All data loaded asynchronously via API endpoints:
+- `get_project_tree` - Hierarchy and CAPEX totals
+- `get_red_flags_summary` - Red flags statistics
+- `calculate_building_tco` - OPEX and TCO per building (called for each building)
+
+### Calculations:
+
+**CAPEX Aggregation:**
+```javascript
+// From project tree endpoint
+totalCapex = sum(all building elements' capex)
+capexWithContingency = totalCapex × (1 + capexContingency)
+```
+
+**OPEX Aggregation:**
+```javascript
+// Per building via calculate_building_tco
+opexPerYear = sum(category_rate × building_area for each assigned category)
+totalOpexPerYear = sum(opexPerYear for all buildings)
+```
+
+**TCO Calculation:**
+```javascript
+// NPV-adjusted OPEX
+opexNpv = sum across all buildings of:
+  sum over years 1 to lifecycleYears:
+    (opexPerYear × (1 + opexEscalation)^(year-1)) / (1 + discountRate)^year
+
+// Final TCO
+tco = capexWithContingency + opexNpv
+```
+
+**Category Aggregation:**
+Recursively aggregates all elements and children across all buildings, groups by category.
+
+### Print Functionality:
+- **Print button** - Uses browser's native print dialog
+- **Print-optimized styles:**
+  - Hides navigation and action buttons (`.no-print`)
+  - Page breaks between major sections (`.page-break`)
+  - Ensures tables don't break across pages (`break-inside: avoid`)
+  - Clean white background for printing
+
+### Export Functionality:
+- **Export PDF button** - Placeholder for backend PDF generation
+- Current recommendation: Use browser print → Save as PDF
+
+### Permission Controls:
+- Users can only generate reports for projects they own
+- Admins can generate reports for any project
+- Access verified on backend in module index.php
+
+### Integration Points:
+1. **Project View:** Add "Generer rapport" button linking to report module
+2. **Building View:** Generate building-specific reports
+3. **Dashboard:** Quick links to recent reports
+4. **Email:** Send PDF reports to stakeholders
+
+### Use Cases:
+
+1. **Executive Presentation:**
+   - Print executive summary page
+   - Share TCO breakdown with management
+   - Highlight critical items requiring immediate attention
+
+2. **Client Deliverable:**
+   - Full report with all sections
+   - Professional formatting
+   - Data-driven insights
+
+3. **Budget Planning:**
+   - CAPEX by category for budget allocation
+   - OPEX projections for operational planning
+   - TCO for long-term financial planning
+
+4. **Progress Tracking:**
+   - Compare reports over time
+   - Track red flags resolution
+   - Monitor cost changes
+
+### Visual Design:
+- **Summary cards:** Color-coded with icons
+  - Primary (blue) for TCO
+  - Danger (red) for critical items
+  - Clean, professional layout
+
+- **Tables:**
+  - Clear headers with proper alignment
+  - Subtotals and totals in footer rows
+  - Percentage columns for context
+  - Alternating row colors for readability
+
+- **Hierarchy:**
+  - Visual indentation for nested items
+  - Left border for child elements
+  - Badges for categories and urgency
+
+### Example Report Flow:
+1. User navigates to `/index.php?module=report&project_id=123`
+2. Report loads with all 7 sections in loading state
+3. Sections populate asynchronously (allows page to render quickly)
+4. User reviews data:
+   - Executive summary shows TCO = 15.3M kr (CAPEX 5.5M + OPEX 9.8M NPV)
+   - Red flags show 5 critical items worth 2.5M kr
+   - CAPEX by building shows Building A = 3M (60%), Building B = 2M (40%)
+   - CAPEX by category shows Facade = 2.5M (50%), HVAC = 1.5M (30%)
+   - OPEX shows 410 kr/m²/år operational costs
+   - TCO breakdown shows 36% CAPEX, 64% OPEX over 30 years
+5. User clicks Print → selects Save as PDF → shares with stakeholders
+
+### Testing Checklist:
+- [ ] Test executive summary calculations
+- [ ] Test red flags summary display
+- [ ] Test CAPEX by building aggregation
+- [ ] Test CAPEX by category aggregation (with nested elements)
+- [ ] Test OPEX by building calculations
+- [ ] Test TCO breakdown accuracy
+- [ ] Test NPV calculation for OPEX
+- [ ] Test hierarchy rendering with nested elements
+- [ ] Test print functionality (browser print dialog)
+- [ ] Test print styling (page breaks, hidden elements)
+- [ ] Test permission boundaries (users see only their projects)
+- [ ] Test with projects having no buildings
+- [ ] Test with buildings having no OPEX assigned
+- [ ] Test async loading behavior
+- [ ] Test responsiveness on mobile devices
