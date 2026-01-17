@@ -2,6 +2,13 @@
 /**
  * API Controller - Centralized API with Role-Based Access Control
  * ALL permissions checked on backend - NEVER trust frontend
+ *
+ * PERFORMANCE OPTIMIZATIONS (2026-01-17):
+ * - Uses database views (v_project_summary, v_building_summary, v_element_summary, etc.)
+ * - Query reduction: Dashboard (7→1), Red Flags Summary (6→1)
+ * - Pre-calculated fields: red flag scores, OPEX totals, budget aggregations
+ * - Optimized functions: getDashboardStats, getDashboardWidgets, getRedFlags,
+ *   getRedFlagsSummary, calculateBuildingTco, calculateBudgetTotal, getProjectTree
  */
 
 require_once __DIR__ . '/core/core.php';
@@ -253,6 +260,7 @@ try {
    ======================================== */
 
 function getDashboardStats(array $user): array {
+    // OPTIMIZED: Use v_project_summary view for aggregated data
     $stats = [
         'customers' => 0,
         'projects' => 0,
@@ -266,22 +274,46 @@ function getDashboardStats(array $user): array {
 
     // Admin sees all, users see only their data
     if (has_permission($user, 'admin')) {
+        // Use view for much faster aggregation (single query instead of 7)
+        $summary = db_fetch("
+            SELECT
+                COUNT(*) as project_count,
+                COALESCE(SUM(building_count), 0) as building_count,
+                COALESCE(SUM(element_count), 0) as element_count,
+                COUNT(CASE WHEN status = 'active' THEN 1 END) as active_count,
+                COALESCE(SUM(total_capex), 0) as total_capex,
+                COALESCE(SUM(critical_count + high_count), 0) as urgent_count
+            FROM v_project_summary
+        ");
+
         $stats['customers'] = db_value("SELECT COUNT(*) FROM customers");
-        $stats['projects'] = db_value("SELECT COUNT(*) FROM projects");
-        $stats['buildings'] = db_value("SELECT COUNT(*) FROM buildings");
-        $stats['elements'] = db_value("SELECT COUNT(*) FROM building_elements");
-        $stats['active_projects'] = db_value("SELECT COUNT(*) FROM projects WHERE status = 'active'");
-        $stats['total_capex'] = db_value("SELECT COALESCE(SUM(capex), 0) FROM building_elements");
-        $stats['urgent_items'] = db_value("SELECT COUNT(*) FROM building_elements WHERE urgency IN ('high', 'critical')");
+        $stats['projects'] = (int)$summary['project_count'];
+        $stats['buildings'] = (int)$summary['building_count'];
+        $stats['elements'] = (int)$summary['element_count'];
+        $stats['active_projects'] = (int)$summary['active_count'];
+        $stats['total_capex'] = (float)$summary['total_capex'];
+        $stats['urgent_items'] = (int)$summary['urgent_count'];
     } else {
-        // Regular users see only their assigned projects
+        // Regular users see only their assigned projects (single query via view)
         $userId = $user['id'];
-        $stats['projects'] = db_value("SELECT COUNT(*) FROM projects WHERE user_id = :uid", ['uid' => $userId]);
-        $stats['buildings'] = db_value("SELECT COUNT(*) FROM buildings b JOIN projects p ON b.project_id = p.id WHERE p.user_id = :uid", ['uid' => $userId]);
-        $stats['elements'] = db_value("SELECT COUNT(*) FROM building_elements be JOIN buildings b ON be.building_id = b.id JOIN projects p ON b.project_id = p.id WHERE p.user_id = :uid", ['uid' => $userId]);
-        $stats['active_projects'] = db_value("SELECT COUNT(*) FROM projects WHERE user_id = :uid AND status = 'active'", ['uid' => $userId]);
-        $stats['total_capex'] = db_value("SELECT COALESCE(SUM(be.capex), 0) FROM building_elements be JOIN buildings b ON be.building_id = b.id JOIN projects p ON b.project_id = p.id WHERE p.user_id = :uid", ['uid' => $userId]);
-        $stats['urgent_items'] = db_value("SELECT COUNT(*) FROM building_elements be JOIN buildings b ON be.building_id = b.id JOIN projects p ON b.project_id = p.id WHERE p.user_id = :uid AND be.urgency IN ('high', 'critical')", ['uid' => $userId]);
+        $summary = db_fetch("
+            SELECT
+                COUNT(*) as project_count,
+                COALESCE(SUM(building_count), 0) as building_count,
+                COALESCE(SUM(element_count), 0) as element_count,
+                COUNT(CASE WHEN status = 'active' THEN 1 END) as active_count,
+                COALESCE(SUM(total_capex), 0) as total_capex,
+                COALESCE(SUM(critical_count + high_count), 0) as urgent_count
+            FROM v_project_summary
+            WHERE user_id = :uid
+        ", ['uid' => $userId]);
+
+        $stats['projects'] = (int)$summary['project_count'];
+        $stats['buildings'] = (int)$summary['building_count'];
+        $stats['elements'] = (int)$summary['element_count'];
+        $stats['active_projects'] = (int)$summary['active_count'];
+        $stats['total_capex'] = (float)$summary['total_capex'];
+        $stats['urgent_items'] = (int)$summary['urgent_count'];
     }
 
     return ['success' => true, 'stats' => $stats];
@@ -305,10 +337,30 @@ function getDashboardWidgets(array $user): array {
     $where = $userId ? "WHERE p.user_id = :uid" : "";
     $params = $userId ? ['uid' => $userId] : [];
 
-    $widgets['recent_projects'] = db_query("SELECT p.*, c.name as customer_name FROM projects p LEFT JOIN customers c ON p.customer_id = c.id $where ORDER BY p.created_at DESC LIMIT 5", $params);
-    
-    $whereUrgent = $userId ? "WHERE p.user_id = :uid AND be.urgency IN ('high', 'critical')" : "WHERE be.urgency IN ('high', 'critical')";
-    $widgets['urgent_elements'] = db_query("SELECT be.*, b.name as building_name FROM building_elements be LEFT JOIN buildings b ON be.building_id = b.id LEFT JOIN projects p ON b.project_id = p.id $whereUrgent ORDER BY CASE be.urgency WHEN 'critical' THEN 1 WHEN 'high' THEN 2 END, be.time_horizon LIMIT 10", $params);
+    // OPTIMIZED: Use v_project_summary for recent projects with pre-calculated stats
+    $widgets['recent_projects'] = db_query("
+        SELECT ps.project_id as id, ps.project_name as name, ps.status,
+               ps.building_count, ps.element_count, ps.total_capex,
+               ps.critical_count, ps.high_count, ps.created_at,
+               c.name as customer_name
+        FROM v_project_summary ps
+        LEFT JOIN projects p ON ps.project_id = p.id
+        LEFT JOIN customers c ON p.customer_id = c.id
+        $where
+        ORDER BY ps.created_at DESC
+        LIMIT 5
+    ", $params);
+
+    // OPTIMIZED: Use v_red_flags for urgent elements (already filtered and scored)
+    $whereUrgent = $userId ? "WHERE project_owner = :uid" : "";
+    $widgets['urgent_elements'] = db_query("
+        SELECT element_id as id, element_name as name, building_name,
+               urgency, capex, red_flag_score, severity
+        FROM v_red_flags
+        $whereUrgent
+        ORDER BY red_flag_score DESC, capex DESC
+        LIMIT 10
+    ", $params);
 
     return ['success' => true, 'widgets' => $widgets, 'permissions' => get_user_permissions($user['id'])];
 }
@@ -955,12 +1007,14 @@ function getProjectTree(array $user): array {
         return ['success' => false, 'error' => 'Projekt ikke fundet'];
     }
 
-    // Get all buildings for this project
+    // OPTIMIZED: Use v_building_summary for pre-calculated building stats
     $buildings = db_query("
-        SELECT id, name
-        FROM buildings
-        WHERE project_id = :pid
-        ORDER BY sort_order, name
+        SELECT bs.building_id as id, bs.building_name as name,
+               bs.element_count, bs.total_capex, bs.critical_elements, bs.high_elements
+        FROM v_building_summary bs
+        JOIN buildings b ON bs.building_id = b.id
+        WHERE bs.project_id = :pid
+        ORDER BY b.sort_order, bs.building_name
     ", ['pid' => $projectId]);
 
     $projectTotal = 0;
@@ -968,9 +1022,10 @@ function getProjectTree(array $user): array {
     // For each building, get hierarchical elements
     foreach ($buildings as &$building) {
         $building['elements'] = getElementHierarchy($building['id']);
-        $building['total_capex'] = calculateBuildingTotal($building['elements']);
-        $building['element_count'] = countElements($building['elements']);
-        $projectTotal += $building['total_capex'];
+        // Use pre-calculated total from view, but recalculate from hierarchy for accuracy
+        $hierarchyTotal = calculateBuildingTotal($building['elements']);
+        $building['total_capex'] = $hierarchyTotal;
+        $projectTotal += $hierarchyTotal;
     }
 
     return [
@@ -1495,21 +1550,14 @@ function calculateBuildingTco(array $user): array {
 
     $capexWithContingency = $capex * (1 + $capexContingency);
 
-    // Calculate annual OPEX (based on building area and assigned categories)
-    $buildingArea = (float)($building['area'] ?? 0);
-    $opexPerYear = 0;
-
-    $assignedOpex = db_fetch_all("
-        SELECT bo.*, oc.rate_per_sqm,
-               COALESCE(bo.custom_rate_per_sqm, oc.rate_per_sqm) as effective_rate
-        FROM building_opex bo
-        JOIN opex_categories oc ON bo.opex_category_id = oc.id
-        WHERE bo.building_id = :building_id
+    // OPTIMIZED: Use v_building_opex_summary for pre-calculated OPEX
+    $opexSummary = db_fetch("
+        SELECT effective_opex_yearly
+        FROM v_building_opex_summary
+        WHERE building_id = :building_id
     ", ['building_id' => $buildingId]);
 
-    foreach ($assignedOpex as $opex) {
-        $opexPerYear += (float)$opex['effective_rate'] * $buildingArea;
-    }
+    $opexPerYear = (float)($opexSummary['effective_opex_yearly'] ?? 0);
 
     // Calculate Net Present Value of OPEX over lifecycle
     $opexNpv = 0;
@@ -1545,12 +1593,13 @@ function calculateBuildingTco(array $user): array {
 
 /**
  * Get red flags for projects with detailed analysis
+ * OPTIMIZED: Uses v_red_flags view with pre-calculated scores
  */
 function getRedFlags(array $user): array {
     $projectId = isset($_GET['project_id']) ? sanitize_int($_GET['project_id']) : null;
 
     // Build WHERE clause based on permissions
-    $where = '';
+    $where = [];
     $params = [];
 
     if ($projectId) {
@@ -1564,121 +1613,102 @@ function getRedFlags(array $user): array {
             return ['success' => false, 'error' => 'Ingen adgang'];
         }
 
-        $where = 'AND p.id = :project_id';
+        $where[] = 'project_id = :project_id';
         $params['project_id'] = $projectId;
     } elseif (!has_permission($user, 'admin')) {
         // Regular users see only their projects
-        $where = 'AND p.user_id = :user_id';
+        $where[] = 'project_owner = :user_id';
         $params['user_id'] = $user['id'];
     }
 
-    // Get all building elements with red flag indicators
-    $elements = db_fetch_all("
-        SELECT
-            be.*,
-            b.name as building_name,
-            b.id as building_id,
-            p.name as project_name,
-            p.id as project_id,
-            p.user_id as project_owner
-        FROM building_elements be
-        JOIN buildings b ON be.building_id = b.id
-        JOIN projects p ON b.project_id = p.id
-        WHERE 1=1 $where
-        ORDER BY
-            CASE be.urgency
-                WHEN 'critical' THEN 1
-                WHEN 'high' THEN 2
-                WHEN 'normal' THEN 3
-                WHEN 'low' THEN 4
-                ELSE 5
-            END,
-            be.capex DESC
+    $whereClause = !empty($where) ? 'WHERE ' . implode(' AND ', $where) : '';
+
+    // OPTIMIZED: Use v_red_flags view - scores and severity pre-calculated in database
+    $redFlagElements = db_fetch_all("
+        SELECT *
+        FROM v_red_flags
+        $whereClause
+        ORDER BY red_flag_score DESC, capex DESC
     ", $params);
 
     $redFlags = [];
 
-    foreach ($elements as $element) {
+    // Build flag details array from pre-calculated indicators
+    foreach ($redFlagElements as $element) {
         $flags = [];
-        $severity = 'low';
-        $score = 0;
 
-        // Check urgency level
-        if (in_array($element['urgency'], ['critical', 'high'])) {
+        // Add flags based on indicators (already calculated in view)
+        if ($element['is_critical_urgency'] == 1) {
             $flags[] = [
                 'type' => 'urgency',
                 'label' => 'Høj prioritet',
-                'description' => 'Element markeret som ' . ($element['urgency'] === 'critical' ? 'kritisk' : 'høj') . ' prioritet',
-                'severity' => $element['urgency']
+                'description' => 'Element markeret som kritisk prioritet',
+                'severity' => 'critical'
             ];
-            $score += $element['urgency'] === 'critical' ? 10 : 7;
-            $severity = $element['urgency'];
+        } elseif ($element['is_high_urgency'] == 1) {
+            $flags[] = [
+                'type' => 'urgency',
+                'label' => 'Høj prioritet',
+                'description' => 'Element markeret som høj prioritet',
+                'severity' => 'high'
+            ];
         }
 
-        // Check condition
-        if (!empty($element['condition'])) {
-            $condition = strtolower($element['condition']);
-            if (in_array($condition, ['dårlig', 'kritisk', 'poor', 'critical'])) {
-                $flags[] = [
-                    'type' => 'condition',
-                    'label' => 'Dårlig tilstand',
-                    'description' => 'Element i dårlig eller kritisk tilstand',
-                    'severity' => 'high'
-                ];
-                $score += 8;
-                if ($severity !== 'critical') $severity = 'high';
-            }
+        if ($element['is_poor_condition'] == 1) {
+            $flags[] = [
+                'type' => 'condition',
+                'label' => 'Dårlig tilstand',
+                'description' => 'Element i dårlig eller kritisk tilstand',
+                'severity' => 'high'
+            ];
         }
 
-        // Check high CAPEX
-        $capex = (float)($element['capex'] ?? 0);
-        if ($capex > 500000) {
+        if ($element['is_high_cost'] == 1) {
             $flags[] = [
                 'type' => 'high_cost',
                 'label' => 'Høj omkostning',
                 'description' => 'CAPEX over 500.000 kr',
                 'severity' => 'normal'
             ];
-            $score += 5;
         }
 
-        // Check missing description
-        if (empty($element['description']) || strlen(trim($element['description'])) < 10) {
+        if ($element['is_missing_description'] == 1) {
             $flags[] = [
                 'type' => 'missing_data',
                 'label' => 'Manglende beskrivelse',
                 'description' => 'Element mangler detaljeret beskrivelse',
                 'severity' => 'low'
             ];
-            $score += 2;
         }
 
-        // Check missing quantity or unit
-        if (empty($element['quantity']) || (float)$element['quantity'] <= 0) {
+        if ($element['is_missing_quantity'] == 1) {
             $flags[] = [
                 'type' => 'missing_data',
                 'label' => 'Manglende mængde',
                 'description' => 'Element mangler mængdeangivelse',
                 'severity' => 'normal'
             ];
-            $score += 3;
         }
 
-        // Only include elements with at least one flag
-        if (!empty($flags)) {
-            $redFlags[] = [
-                'element' => $element,
-                'flags' => $flags,
-                'severity' => $severity,
-                'score' => $score
-            ];
-        }
+        $redFlags[] = [
+            'element' => [
+                'id' => $element['element_id'],
+                'name' => $element['element_name'],
+                'building_id' => $element['building_id'],
+                'building_name' => $element['building_name'],
+                'project_id' => $element['project_id'],
+                'project_name' => $element['project_name'],
+                'urgency' => $element['urgency'],
+                'condition' => $element['condition'],
+                'capex' => $element['capex'],
+                'description' => $element['description'],
+                'quantity' => $element['quantity']
+            ],
+            'flags' => $flags,
+            'severity' => $element['severity'], // Pre-calculated in view
+            'score' => (int)$element['red_flag_score'] // Pre-calculated in view
+        ];
     }
-
-    // Sort by score (highest first)
-    usort($redFlags, function($a, $b) {
-        return $b['score'] - $a['score'];
-    });
 
     return [
         'success' => true,
@@ -1689,12 +1719,13 @@ function getRedFlags(array $user): array {
 
 /**
  * Get red flags summary with statistics
+ * OPTIMIZED: Uses v_red_flags view - single query instead of 6
  */
 function getRedFlagsSummary(array $user): array {
     $projectId = isset($_GET['project_id']) ? sanitize_int($_GET['project_id']) : null;
 
     // Build WHERE clause based on permissions
-    $where = '';
+    $where = [];
     $params = [];
 
     if ($projectId) {
@@ -1708,136 +1739,69 @@ function getRedFlagsSummary(array $user): array {
             return ['success' => false, 'error' => 'Ingen adgang'];
         }
 
-        $where = 'AND p.id = :project_id';
+        $where[] = 'project_id = :project_id';
         $params['project_id'] = $projectId;
     } elseif (!has_permission($user, 'admin')) {
         // Regular users see only their projects
-        $where = 'AND p.user_id = :user_id';
+        $where[] = 'project_owner = :user_id';
         $params['user_id'] = $user['id'];
     }
 
-    // Get urgency statistics
-    $urgencyStats = db_fetch_all("
+    $whereClause = !empty($where) ? 'WHERE ' . implode(' AND ', $where) : '';
+
+    // OPTIMIZED: Single query to v_red_flags view aggregates all statistics
+    $stats = db_fetch("
         SELECT
-            be.urgency,
-            COUNT(*) as count,
-            COALESCE(SUM(be.capex), 0) as total_capex
-        FROM building_elements be
-        JOIN buildings b ON be.building_id = b.id
-        JOIN projects p ON b.project_id = p.id
-        WHERE be.urgency IN ('high', 'critical') $where
-        GROUP BY be.urgency
+            -- Urgency counts
+            SUM(CASE WHEN is_critical_urgency = 1 THEN 1 ELSE 0 END) as critical_count,
+            SUM(CASE WHEN is_critical_urgency = 1 THEN capex ELSE 0 END) as critical_capex,
+            SUM(CASE WHEN is_high_urgency = 1 THEN 1 ELSE 0 END) as high_count,
+            SUM(CASE WHEN is_high_urgency = 1 THEN capex ELSE 0 END) as high_capex,
+
+            -- Condition counts
+            SUM(CASE WHEN is_poor_condition = 1 THEN 1 ELSE 0 END) as poor_condition_count,
+            SUM(CASE WHEN is_poor_condition = 1 THEN capex ELSE 0 END) as poor_condition_capex,
+
+            -- High cost counts
+            SUM(CASE WHEN is_high_cost = 1 THEN 1 ELSE 0 END) as high_cost_count,
+            SUM(CASE WHEN is_high_cost = 1 THEN capex ELSE 0 END) as high_cost_capex,
+
+            -- Data quality counts
+            SUM(CASE WHEN is_missing_description = 1 THEN 1 ELSE 0 END) as missing_description,
+            SUM(CASE WHEN is_missing_quantity = 1 THEN 1 ELSE 0 END) as missing_quantity
+
+        FROM v_red_flags
+        $whereClause
     ", $params);
-
-    // Get condition statistics
-    $conditionStats = db_fetch_all("
-        SELECT
-            be.condition,
-            COUNT(*) as count,
-            COALESCE(SUM(be.capex), 0) as total_capex
-        FROM building_elements be
-        JOIN buildings b ON be.building_id = b.id
-        JOIN projects p ON b.project_id = p.id
-        WHERE be.condition IS NOT NULL
-        AND LOWER(be.condition) IN ('dårlig', 'kritisk', 'poor', 'critical')
-        $where
-        GROUP BY be.condition
-    ", $params);
-
-    // Get high cost items (> 500k)
-    $highCostCount = db_value("
-        SELECT COUNT(*)
-        FROM building_elements be
-        JOIN buildings b ON be.building_id = b.id
-        JOIN projects p ON b.project_id = p.id
-        WHERE be.capex > 500000 $where
-    ", $params);
-
-    $highCostCapex = db_value("
-        SELECT COALESCE(SUM(be.capex), 0)
-        FROM building_elements be
-        JOIN buildings b ON be.building_id = b.id
-        JOIN projects p ON b.project_id = p.id
-        WHERE be.capex > 500000 $where
-    ", $params);
-
-    // Get missing data statistics
-    $missingDescCount = db_value("
-        SELECT COUNT(*)
-        FROM building_elements be
-        JOIN buildings b ON be.building_id = b.id
-        JOIN projects p ON b.project_id = p.id
-        WHERE (be.description IS NULL OR LENGTH(TRIM(be.description)) < 10) $where
-    ", $params);
-
-    $missingQtyCount = db_value("
-        SELECT COUNT(*)
-        FROM building_elements be
-        JOIN buildings b ON be.building_id = b.id
-        JOIN projects p ON b.project_id = p.id
-        WHERE (be.quantity IS NULL OR be.quantity <= 0) $where
-    ", $params);
-
-    // Calculate total urgent CAPEX
-    $totalUrgentCapex = 0;
-    foreach ($urgencyStats as $stat) {
-        $totalUrgentCapex += (float)$stat['total_capex'];
-    }
-
-    // Calculate total poor condition CAPEX
-    $totalPoorConditionCapex = 0;
-    foreach ($conditionStats as $stat) {
-        $totalPoorConditionCapex += (float)$stat['total_capex'];
-    }
-
-    // Count total red flags
-    $criticalCount = 0;
-    $highCount = 0;
-    foreach ($urgencyStats as $stat) {
-        if ($stat['urgency'] === 'critical') {
-            $criticalCount = (int)$stat['count'];
-        } elseif ($stat['urgency'] === 'high') {
-            $highCount = (int)$stat['count'];
-        }
-    }
 
     $summary = [
         'urgency' => [
             'critical' => [
-                'count' => $criticalCount,
-                'capex' => 0
+                'count' => (int)($stats['critical_count'] ?? 0),
+                'capex' => (float)($stats['critical_capex'] ?? 0)
             ],
             'high' => [
-                'count' => $highCount,
-                'capex' => 0
+                'count' => (int)($stats['high_count'] ?? 0),
+                'capex' => (float)($stats['high_capex'] ?? 0)
             ]
         ],
         'condition' => [
-            'poor_condition_count' => count($conditionStats) > 0 ? array_sum(array_column($conditionStats, 'count')) : 0,
-            'poor_condition_capex' => $totalPoorConditionCapex
+            'poor_condition_count' => (int)($stats['poor_condition_count'] ?? 0),
+            'poor_condition_capex' => (float)($stats['poor_condition_capex'] ?? 0)
         ],
         'costs' => [
-            'high_cost_count' => (int)$highCostCount,
-            'high_cost_capex' => (float)$highCostCapex
+            'high_cost_count' => (int)($stats['high_cost_count'] ?? 0),
+            'high_cost_capex' => (float)($stats['high_cost_capex'] ?? 0)
         ],
         'data_quality' => [
-            'missing_description' => (int)$missingDescCount,
-            'missing_quantity' => (int)$missingQtyCount
+            'missing_description' => (int)($stats['missing_description'] ?? 0),
+            'missing_quantity' => (int)($stats['missing_quantity'] ?? 0)
         ],
         'totals' => [
-            'total_urgent_items' => $criticalCount + $highCount,
-            'total_urgent_capex' => $totalUrgentCapex
+            'total_urgent_items' => (int)($stats['critical_count'] ?? 0) + (int)($stats['high_count'] ?? 0),
+            'total_urgent_capex' => (float)($stats['critical_capex'] ?? 0) + (float)($stats['high_capex'] ?? 0)
         ]
     ];
-
-    // Fill in CAPEX for urgency levels
-    foreach ($urgencyStats as $stat) {
-        if ($stat['urgency'] === 'critical') {
-            $summary['urgency']['critical']['capex'] = (float)$stat['total_capex'];
-        } elseif ($stat['urgency'] === 'high') {
-            $summary['urgency']['high']['capex'] = (float)$stat['total_capex'];
-        }
-    }
 
     return [
         'success' => true,
@@ -2206,19 +2170,32 @@ function calculateBudgetTotal(array $user): array {
         return ['success' => false, 'error' => 'Ingen adgang'];
     }
 
-    // Calculate totals
+    // OPTIMIZED: Use v_budget_totals view for pre-calculated totals
     $result = db_fetch("
         SELECT
-            COUNT(*) as line_count,
-            COALESCE(SUM(quantity * price_per_unit), 0) as total,
-            COALESCE(SUM(year_0_1), 0) as total_year_0_1,
-            COALESCE(SUM(year_1_2), 0) as total_year_1_2,
-            COALESCE(SUM(year_3_5), 0) as total_year_3_5,
-            COALESCE(SUM(year_5_10), 0) as total_year_5_10,
-            COALESCE(SUM(year_10_plus), 0) as total_year_10_plus
-        FROM budget_lines
+            line_count,
+            total_budget as total,
+            total_year_0_1,
+            total_year_1_2,
+            total_year_3_5,
+            total_year_5_10,
+            total_year_10_plus
+        FROM v_budget_totals
         WHERE element_id = :element_id AND budget_type = :budget_type
     ", ['element_id' => $elementId, 'budget_type' => $budgetType]);
+
+    // If no budget lines exist, return zeros
+    if (!$result) {
+        $result = [
+            'line_count' => 0,
+            'total' => 0,
+            'total_year_0_1' => 0,
+            'total_year_1_2' => 0,
+            'total_year_3_5' => 0,
+            'total_year_5_10' => 0,
+            'total_year_10_plus' => 0
+        ];
+    }
 
     return [
         'success' => true,
