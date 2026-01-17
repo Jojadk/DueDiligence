@@ -415,7 +415,7 @@ Uses existing schema features:
 ## Testing Checklist Additions
 
 - [ ] Test tree view loads correctly with multiple buildings
-- [ ] Test expand/collapse functionality  
+- [ ] Test expand/collapse functionality
 - [ ] Test drag-drop reordering within same parent
 - [ ] Test drag-drop moving element to different parent
 - [ ] Test cost totals calculate correctly up hierarchy
@@ -423,3 +423,374 @@ Uses existing schema features:
 - [ ] Test edit button opens element form
 - [ ] Test tree view with viewer permissions (read-only)
 - [ ] Test tree updates after element edits in main module
+
+## 10. OPEX Module with Experience Values ✅
+
+**Location:**
+- `modules/opex/index.php` - OPEX module controller
+- `modules/opex/template.tpl` - OPEX module template
+- `api.php` - OPEX API endpoints (11 new endpoints)
+- `migrations/create_opex_tables.sql` - Database schema for OPEX
+
+### Features:
+**OPEX is a separate module** (NOT just fields in building_elements) with experience values based on square meters (m²).
+
+### Database Schema:
+1. **opex_categories** - Experience values per m² per year
+   - Categories: Rengøring, Energi, Vand og afløb, Forsikring, Ejendomsskat, Sikkerhed, Affaldshåndtering, Mindre reparationer, Administration, Udvendig vedligehold
+   - Default rates ranging from 10-120 kr/m²/år
+   - Grouped by type: maintenance, energy, utilities, insurance, tax, security, waste, admin
+
+2. **building_opex** - OPEX assignments to buildings
+   - Links OPEX categories to specific buildings
+   - Supports custom rates per building (override defaults)
+   - Notes field for documentation
+
+3. **tco_config** - TCO configuration constants
+   - lifecycle_years: 30 years (default)
+   - discount_rate: 3% (default)
+   - inflation_rate: 2% (default)
+   - capex_contingency: 10% (default)
+   - opex_escalation: 2.5% annual increase (default)
+
+### OPEX Calculation:
+- Annual OPEX = Σ(rate_per_sqm × building_area) for all assigned categories
+- Supports custom rates per building to override defaults
+- Automatic calculation based on building area (m²)
+
+### TCO Calculation:
+- **CAPEX** = Sum of all building elements' capex values
+- **CAPEX with contingency** = CAPEX × (1 + capex_contingency)
+- **OPEX NPV** = Net Present Value of OPEX over lifecycle with escalation and discount
+- **TCO** = CAPEX with contingency + OPEX NPV
+
+Formula for OPEX NPV:
+```
+For each year 1 to lifecycle_years:
+  year_opex = opex_per_year × (1 + opex_escalation)^(year-1)
+  discount_factor = (1 + discount_rate)^year
+  opex_npv += year_opex / discount_factor
+```
+
+### API Endpoints (11 new):
+- `get_available_opex_categories` - Get categories not yet assigned to building
+- `assign_opex_to_building` - Assign OPEX category to building
+- `get_opex_assignment` - Get assignment details
+- `update_opex_assignment` - Update custom rate and notes
+- `remove_opex_assignment` - Remove OPEX category from building
+- `create_opex_category` - Create new category (admin only)
+- `get_opex_category` - Get category details
+- `update_opex_category` - Update category (admin only)
+- `toggle_opex_category` - Activate/deactivate category (admin only)
+- `update_tco_config` - Update TCO constants (admin only)
+- `calculate_building_tco` - Calculate full TCO breakdown for building
+
+### User Interface:
+
+#### Building-Specific OPEX View:
+- Access via: `?module=opex&building_id=X`
+- **OPEX Overview Card:**
+  - Building area (m²)
+  - Total OPEX per year
+  - OPEX per m² per year
+  - OPEX over lifecycle (e.g., 30 years)
+- **Assigned Categories Table:**
+  - Category name and type
+  - Rate per m²/år (shows if custom or default)
+  - Total per year = rate × building area
+  - Notes field
+  - Edit/Remove actions (permission-controlled)
+- **Add Category Button** - Opens modal to assign new OPEX categories
+
+#### Admin OPEX Management View:
+- Access via: `?module=opex`
+- **Tab 1: OPEX Categories**
+  - Grouped by type (Vedligeholdelse, Energi, Forsyning, etc.)
+  - Table showing: Name, Description, Rate per m²/år, Active status
+  - Create/Edit/Toggle active status (admin only)
+  - Default categories pre-populated
+
+- **Tab 2: TCO Configuration** (admin only)
+  - Editable form for all TCO constants:
+    - lifecycle_years (years)
+    - discount_rate (percent)
+    - inflation_rate (percent)
+    - capex_contingency (percent)
+    - opex_escalation (percent)
+  - Save all changes at once
+
+### Permission Controls:
+- **View OPEX:** Users can view OPEX for buildings in their projects
+- **Edit OPEX:** Users can assign/update/remove OPEX for their buildings
+- **Manage Categories:** Only admins can create/edit/toggle OPEX categories
+- **TCO Config:** Only admins can update TCO configuration constants
+
+### Integration Points:
+1. **Building Module:** Add "OPEX" button/link to building view
+2. **Project Reports:** TCO calculations available for project summaries
+3. **Dashboard:** Can add OPEX/TCO widgets showing total operational costs
+
+### Running Migration:
+```bash
+php migrations/run_migration.php create_opex_tables.sql
+```
+
+This creates:
+- opex_categories table with 10 default categories
+- building_opex table for assignments
+- tco_config table with 5 default constants
+- Necessary indexes and triggers
+
+### Default OPEX Categories:
+1. **Rengøring** - 75 kr/m²/år (Maintenance)
+2. **Energi** - 120 kr/m²/år (Energy)
+3. **Vand og afløb** - 25 kr/m²/år (Utilities)
+4. **Forsikring** - 15 kr/m²/år (Insurance)
+5. **Ejendomsskat** - 30 kr/m²/år (Tax)
+6. **Sikkerhed og overvågning** - 10 kr/m²/år (Security)
+7. **Affaldshåndtering** - 20 kr/m²/år (Waste)
+8. **Mindre reparationer** - 40 kr/m²/år (Maintenance)
+9. **Administration** - 25 kr/m²/år (Admin)
+10. **Udvendig vedligehold** - 50 kr/m²/år (Maintenance)
+
+**Total if all categories assigned:** ~410 kr/m²/år
+
+### Example Calculation:
+Building: 1000 m², All categories assigned
+- Annual OPEX: 410,000 kr/år
+- OPEX over 30 years (NPV with 2.5% escalation, 3% discount): ~9.8M kr
+- If CAPEX = 5M kr, then TCO = 5M × 1.10 + 9.8M = **15.3M kr**
+
+### Testing Checklist:
+- [ ] Test assigning OPEX categories to building
+- [ ] Test custom rate override for specific building
+- [ ] Test removing OPEX category from building
+- [ ] Test OPEX calculations with different building sizes
+- [ ] Test TCO calculation endpoint
+- [ ] Test admin category management (create/edit/toggle)
+- [ ] Test admin TCO config updates
+- [ ] Test permission boundaries (user vs admin)
+- [ ] Test OPEX summary display
+- [ ] Test that non-owners cannot access other users' buildings
+- [ ] Test NPV calculation with different config values
+
+## 11. Red Flags Detection and Reporting System ✅
+
+**Location:**
+- `modules/red_flags/index.php` - Red Flags module controller
+- `modules/red_flags/template.tpl` - Red Flags module template
+- `api.php` - Red Flags API endpoints (2 new endpoints)
+
+### Features:
+Automatic detection and reporting of critical items requiring attention based on multiple criteria.
+
+### Detection Criteria:
+
+1. **Urgency Level (10 points for critical, 7 for high)**
+   - Detects elements marked as `critical` or `high` urgency
+   - Highest priority red flags
+
+2. **Condition (8 points)**
+   - Detects poor or critical condition ratings
+   - Keywords: "dårlig", "kritisk", "poor", "critical"
+
+3. **High Cost (5 points)**
+   - Flags elements with CAPEX > 500,000 kr
+   - Indicates significant financial impact
+
+4. **Missing Description (2 points)**
+   - Flags elements with no description or < 10 characters
+   - Data quality issue
+
+5. **Missing Quantity (3 points)**
+   - Flags elements without quantity or quantity ≤ 0
+   - Data completeness issue
+
+### Scoring System:
+Each element gets a **severity score** based on the sum of all detected issues:
+- Score 10+: Critical severity
+- Score 7-9: High severity
+- Score 3-6: Normal severity
+- Score 1-2: Low severity
+
+Red flags are sorted by score (highest first) to prioritize the most critical items.
+
+### API Endpoints (2 new):
+
+#### `get_red_flags`
+Returns detailed list of all red flags with:
+- Element details (name, CAPEX, quantity, condition, etc.)
+- Building and project information
+- List of detected flags with descriptions
+- Severity level and score
+- Sorted by priority score
+
+Parameters:
+- `project_id` (optional): Filter by specific project
+
+Response:
+```json
+{
+  "success": true,
+  "red_flags": [
+    {
+      "element": {
+        "id": 123,
+        "name": "Facade renovation",
+        "capex": 750000,
+        "urgency": "critical",
+        "condition": "poor",
+        "project_name": "Building A",
+        "building_name": "Main Building"
+      },
+      "flags": [
+        {
+          "type": "urgency",
+          "label": "Høj prioritet",
+          "description": "Element markeret som kritisk prioritet",
+          "severity": "critical"
+        },
+        {
+          "type": "condition",
+          "label": "Dårlig tilstand",
+          "description": "Element i dårlig eller kritisk tilstand",
+          "severity": "high"
+        },
+        {
+          "type": "high_cost",
+          "label": "Høj omkostning",
+          "description": "CAPEX over 500.000 kr",
+          "severity": "normal"
+        }
+      ],
+      "severity": "critical",
+      "score": 23
+    }
+  ],
+  "total_count": 15
+}
+```
+
+#### `get_red_flags_summary`
+Returns statistical summary of red flags:
+- Urgency statistics (critical/high counts and CAPEX)
+- Condition statistics (poor condition items and CAPEX)
+- High cost items (count and total CAPEX)
+- Data quality metrics (missing descriptions, missing quantities)
+
+Response:
+```json
+{
+  "success": true,
+  "summary": {
+    "urgency": {
+      "critical": {"count": 5, "capex": 2500000},
+      "high": {"count": 12, "capex": 3800000}
+    },
+    "condition": {
+      "poor_condition_count": 8,
+      "poor_condition_capex": 1200000
+    },
+    "costs": {
+      "high_cost_count": 15,
+      "high_cost_capex": 12000000
+    },
+    "data_quality": {
+      "missing_description": 23,
+      "missing_quantity": 17
+    },
+    "totals": {
+      "total_urgent_items": 17,
+      "total_urgent_capex": 6300000
+    }
+  }
+}
+```
+
+### User Interface:
+
+#### Summary Cards Section:
+- **Kritiske elementer** - Count and CAPEX of critical items (red)
+- **Høj prioritet** - Count and CAPEX of high priority items (orange)
+- **Dårlig tilstand** - Count and CAPEX of poor condition items (blue)
+- **Høje omkostninger** - Count and CAPEX of items > 500k
+- **Manglende beskrivelse** - Data quality metric
+- **Manglende mængde** - Data quality metric
+
+#### Filters:
+- **Alvorlighed:** Filter by severity (critical, high, normal, low)
+- **Flag type:** Filter by specific issue type (urgency, condition, high_cost, missing_data)
+- **Sortering:** Sort by score, CAPEX, or project
+
+#### Red Flags List:
+Each red flag item displays:
+- **Header:** Severity badge, element name, project/building breadcrumb
+- **Score badge:** Visual indicator of priority (higher = more urgent)
+- **Flags section:** List of all detected issues with descriptions
+- **Details section:** CAPEX, quantity, unit, condition
+- **Actions:** "Rediger element" button linking to element editor
+
+Visual design:
+- Critical items: Red left border
+- High items: Orange left border
+- Hover effect for better UX
+- Color-coded flag badges matching severity
+
+### Permission Controls:
+- **View Red Flags:** Users can view red flags for their own projects
+- **Admin:** Can view red flags across all projects
+- Filtering respects ownership and admin permissions
+
+### Integration Points:
+1. **Dashboard:** Can add Red Flags widget showing critical items count
+2. **Project View:** Add "Red Flags" button to show project-specific issues
+3. **Building View:** Show red flags count for specific building
+4. **Reports:** Include red flags summary in executive reports
+
+### Use Cases:
+
+1. **Daily Monitoring:**
+   - Check red flags dashboard each morning
+   - Address critical items first (highest scores)
+
+2. **Project Health Check:**
+   - Filter red flags by project
+   - Review before client meetings
+   - Track resolution progress
+
+3. **Data Quality:**
+   - Use missing data filters
+   - Assign team to complete descriptions/quantities
+   - Improve overall data completeness
+
+4. **Budget Planning:**
+   - Filter by high cost items
+   - Review critical + high cost combination
+   - Prioritize funding allocation
+
+### Example Scenario:
+Project has 100 building elements:
+- 5 marked as critical urgency → 5 red flags (score 10 each)
+- 10 with poor condition → 10 red flags (score 8 each)
+- 20 with CAPEX > 500k → 20 red flags (score 5 each)
+- 15 missing descriptions → 15 red flags (score 2 each)
+
+Total: 50 red flags detected automatically
+Critical items (score 10+) appear at top of list
+User can focus on highest priority items first
+
+### Testing Checklist:
+- [ ] Test red flags detection for critical urgency
+- [ ] Test red flags detection for high urgency
+- [ ] Test red flags detection for poor condition
+- [ ] Test red flags detection for high CAPEX
+- [ ] Test red flags detection for missing data
+- [ ] Test scoring system prioritization
+- [ ] Test filtering by severity
+- [ ] Test filtering by flag type
+- [ ] Test sorting options (score, CAPEX, project)
+- [ ] Test project-specific red flags view
+- [ ] Test permission boundaries (users see only their projects)
+- [ ] Test summary statistics accuracy
+- [ ] Test red flags with multiple flags on same element
+- [ ] Test empty state when no red flags exist

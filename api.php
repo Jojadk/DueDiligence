@@ -145,6 +145,67 @@ try {
             echo json_encode(['success' => true, 'token' => csrf_token()]);
             break;
 
+        // OPEX Management
+        case 'get_available_opex_categories':
+            echo json_encode(getAvailableOpexCategories($currentUser));
+            break;
+
+        case 'assign_opex_to_building':
+            csrf_require();
+            echo json_encode(assignOpexToBuilding($currentUser));
+            break;
+
+        case 'get_opex_assignment':
+            echo json_encode(getOpexAssignment($currentUser));
+            break;
+
+        case 'update_opex_assignment':
+            csrf_require();
+            echo json_encode(updateOpexAssignment($currentUser));
+            break;
+
+        case 'remove_opex_assignment':
+            csrf_require();
+            echo json_encode(removeOpexAssignment($currentUser));
+            break;
+
+        case 'create_opex_category':
+            csrf_require();
+            echo json_encode(createOpexCategory($currentUser));
+            break;
+
+        case 'get_opex_category':
+            echo json_encode(getOpexCategory($currentUser));
+            break;
+
+        case 'update_opex_category':
+            csrf_require();
+            echo json_encode(updateOpexCategory($currentUser));
+            break;
+
+        case 'toggle_opex_category':
+            csrf_require();
+            echo json_encode(toggleOpexCategory($currentUser));
+            break;
+
+        case 'update_tco_config':
+            csrf_require();
+            echo json_encode(updateTcoConfig($currentUser));
+            break;
+
+        case 'calculate_building_tco':
+            echo json_encode(calculateBuildingTco($currentUser));
+            break;
+
+        // Red Flags System
+        case 'get_red_flags':
+            echo json_encode(getRedFlags($currentUser));
+            break;
+
+        case 'get_red_flags_summary':
+            echo json_encode(getRedFlagsSummary($currentUser));
+            break;
+
         default:
             http_response_code(404);
             echo json_encode(['success' => false, 'error' => 'Action not found']);
@@ -1003,4 +1064,751 @@ function updateElementHierarchy(array $user): array {
         log_error('Hierarchy update error: ' . $e->getMessage());
         return ['success' => false, 'error' => 'Kunne ikke opdatere hierarki'];
     }
+}
+
+/* ========================================
+   OPEX MANAGEMENT
+   ======================================== */
+
+/**
+ * Get available OPEX categories for assignment to building
+ */
+function getAvailableOpexCategories(array $user): array {
+    $buildingId = sanitize_int($_POST['building_id'] ?? $_GET['building_id'] ?? 0);
+
+    if (!$buildingId) {
+        return ['success' => false, 'error' => 'Building ID mangler'];
+    }
+
+    // Verify building access
+    $building = db_fetch("
+        SELECT b.*, p.user_id
+        FROM buildings b
+        JOIN projects p ON b.project_id = p.id
+        WHERE b.id = :id
+    ", ['id' => $buildingId]);
+
+    if (!$building) {
+        return ['success' => false, 'error' => 'Bygning ikke fundet'];
+    }
+
+    if (!has_permission($user, 'admin') && $building['user_id'] != $user['id']) {
+        return ['success' => false, 'error' => 'Ingen adgang'];
+    }
+
+    // Get active categories not already assigned to this building
+    $categories = db_fetch_all("
+        SELECT oc.*
+        FROM opex_categories oc
+        WHERE oc.is_active = true
+        AND oc.id NOT IN (
+            SELECT opex_category_id
+            FROM building_opex
+            WHERE building_id = :building_id
+        )
+        ORDER BY oc.category_type, oc.name
+    ", ['building_id' => $buildingId]);
+
+    return ['success' => true, 'categories' => $categories];
+}
+
+/**
+ * Assign OPEX category to building
+ */
+function assignOpexToBuilding(array $user): array {
+    if (!has_permission($user, 'edit_buildings')) {
+        return ['success' => false, 'error' => 'Ingen tilladelse'];
+    }
+
+    $buildingId = sanitize_int($_POST['building_id'] ?? 0);
+    $categoryId = sanitize_int($_POST['category_id'] ?? 0);
+    $customRate = !empty($_POST['custom_rate']) ? sanitize_float($_POST['custom_rate']) : null;
+    $notes = sanitize_string($_POST['notes'] ?? '');
+
+    // Verify building ownership
+    $building = db_fetch("
+        SELECT b.*, p.user_id
+        FROM buildings b
+        JOIN projects p ON b.project_id = p.id
+        WHERE b.id = :id
+    ", ['id' => $buildingId]);
+
+    if (!$building) {
+        return ['success' => false, 'error' => 'Bygning ikke fundet'];
+    }
+
+    if (!has_permission($user, 'admin') && $building['user_id'] != $user['id']) {
+        return ['success' => false, 'error' => 'Ingen adgang'];
+    }
+
+    // Verify category exists
+    $category = db_fetch("SELECT * FROM opex_categories WHERE id = :id", ['id' => $categoryId]);
+    if (!$category) {
+        return ['success' => false, 'error' => 'OPEX kategori ikke fundet'];
+    }
+
+    try {
+        db_insert('building_opex', [
+            'building_id' => $buildingId,
+            'opex_category_id' => $categoryId,
+            'custom_rate_per_sqm' => $customRate,
+            'notes' => $notes
+        ]);
+
+        log_activity('opex_assigned', 'building', $buildingId);
+
+        return ['success' => true, 'message' => 'OPEX kategori tilføjet'];
+    } catch (Exception $e) {
+        log_error('OPEX assignment error: ' . $e->getMessage());
+        return ['success' => false, 'error' => 'Kunne ikke tilføje OPEX kategori'];
+    }
+}
+
+/**
+ * Get OPEX assignment details
+ */
+function getOpexAssignment(array $user): array {
+    $assignmentId = sanitize_int($_POST['assignment_id'] ?? $_GET['assignment_id'] ?? 0);
+
+    $assignment = db_fetch("
+        SELECT bo.*, oc.name, oc.rate_per_sqm as default_rate, oc.category_type,
+               p.user_id
+        FROM building_opex bo
+        JOIN opex_categories oc ON bo.opex_category_id = oc.id
+        JOIN buildings b ON bo.building_id = b.id
+        JOIN projects p ON b.project_id = p.id
+        WHERE bo.id = :id
+    ", ['id' => $assignmentId]);
+
+    if (!$assignment) {
+        return ['success' => false, 'error' => 'OPEX tildeling ikke fundet'];
+    }
+
+    // Verify access
+    if (!has_permission($user, 'admin') && $assignment['user_id'] != $user['id']) {
+        return ['success' => false, 'error' => 'Ingen adgang'];
+    }
+
+    return ['success' => true, 'assignment' => $assignment];
+}
+
+/**
+ * Update OPEX assignment
+ */
+function updateOpexAssignment(array $user): array {
+    if (!has_permission($user, 'edit_buildings')) {
+        return ['success' => false, 'error' => 'Ingen tilladelse'];
+    }
+
+    $assignmentId = sanitize_int($_POST['assignment_id'] ?? 0);
+    $customRate = !empty($_POST['custom_rate']) ? sanitize_float($_POST['custom_rate']) : null;
+    $notes = sanitize_string($_POST['notes'] ?? '');
+
+    // Verify ownership
+    $assignment = db_fetch("
+        SELECT bo.*, p.user_id
+        FROM building_opex bo
+        JOIN buildings b ON bo.building_id = b.id
+        JOIN projects p ON b.project_id = p.id
+        WHERE bo.id = :id
+    ", ['id' => $assignmentId]);
+
+    if (!$assignment) {
+        return ['success' => false, 'error' => 'OPEX tildeling ikke fundet'];
+    }
+
+    if (!has_permission($user, 'admin') && $assignment['user_id'] != $user['id']) {
+        return ['success' => false, 'error' => 'Ingen adgang'];
+    }
+
+    try {
+        db_update('building_opex', [
+            'custom_rate_per_sqm' => $customRate,
+            'notes' => $notes
+        ], 'id = :id', ['id' => $assignmentId]);
+
+        log_activity('opex_updated', 'building_opex', $assignmentId);
+
+        return ['success' => true, 'message' => 'OPEX opdateret'];
+    } catch (Exception $e) {
+        log_error('OPEX update error: ' . $e->getMessage());
+        return ['success' => false, 'error' => 'Kunne ikke opdatere OPEX'];
+    }
+}
+
+/**
+ * Remove OPEX assignment from building
+ */
+function removeOpexAssignment(array $user): array {
+    if (!has_permission($user, 'edit_buildings')) {
+        return ['success' => false, 'error' => 'Ingen tilladelse'];
+    }
+
+    $assignmentId = sanitize_int($_POST['assignment_id'] ?? 0);
+
+    // Verify ownership
+    $assignment = db_fetch("
+        SELECT bo.*, p.user_id
+        FROM building_opex bo
+        JOIN buildings b ON bo.building_id = b.id
+        JOIN projects p ON b.project_id = p.id
+        WHERE bo.id = :id
+    ", ['id' => $assignmentId]);
+
+    if (!$assignment) {
+        return ['success' => false, 'error' => 'OPEX tildeling ikke fundet'];
+    }
+
+    if (!has_permission($user, 'admin') && $assignment['user_id'] != $user['id']) {
+        return ['success' => false, 'error' => 'Ingen adgang'];
+    }
+
+    try {
+        db_delete('building_opex', 'id = :id', ['id' => $assignmentId]);
+
+        log_activity('opex_removed', 'building_opex', $assignmentId);
+
+        return ['success' => true, 'message' => 'OPEX kategori fjernet'];
+    } catch (Exception $e) {
+        log_error('OPEX remove error: ' . $e->getMessage());
+        return ['success' => false, 'error' => 'Kunne ikke fjerne OPEX kategori'];
+    }
+}
+
+/**
+ * Create new OPEX category (admin only)
+ */
+function createOpexCategory(array $user): array {
+    if (!has_permission($user, 'admin')) {
+        return ['success' => false, 'error' => 'Kun administratorer kan oprette OPEX kategorier'];
+    }
+
+    $name = sanitize_string($_POST['name'] ?? '');
+    $description = sanitize_string($_POST['description'] ?? '');
+    $categoryType = sanitize_string($_POST['category_type'] ?? '');
+    $ratePerSqm = sanitize_float($_POST['rate_per_sqm'] ?? 0);
+
+    if (empty($name) || empty($categoryType) || $ratePerSqm <= 0) {
+        return ['success' => false, 'error' => 'Udfyld venligst alle påkrævede felter'];
+    }
+
+    try {
+        $id = db_insert('opex_categories', [
+            'name' => $name,
+            'description' => $description,
+            'category_type' => $categoryType,
+            'rate_per_sqm' => $ratePerSqm,
+            'is_active' => true
+        ]);
+
+        log_activity('opex_category_created', 'opex_category', $id);
+
+        return ['success' => true, 'message' => 'OPEX kategori oprettet', 'id' => $id];
+    } catch (Exception $e) {
+        log_error('OPEX category creation error: ' . $e->getMessage());
+        return ['success' => false, 'error' => 'Kunne ikke oprette OPEX kategori'];
+    }
+}
+
+/**
+ * Get OPEX category details
+ */
+function getOpexCategory(array $user): array {
+    $categoryId = sanitize_int($_POST['category_id'] ?? $_GET['category_id'] ?? 0);
+
+    $category = db_fetch("SELECT * FROM opex_categories WHERE id = :id", ['id' => $categoryId]);
+
+    if (!$category) {
+        return ['success' => false, 'error' => 'OPEX kategori ikke fundet'];
+    }
+
+    return ['success' => true, 'category' => $category];
+}
+
+/**
+ * Update OPEX category (admin only)
+ */
+function updateOpexCategory(array $user): array {
+    if (!has_permission($user, 'admin')) {
+        return ['success' => false, 'error' => 'Kun administratorer kan opdatere OPEX kategorier'];
+    }
+
+    $categoryId = sanitize_int($_POST['category_id'] ?? 0);
+    $name = sanitize_string($_POST['name'] ?? '');
+    $description = sanitize_string($_POST['description'] ?? '');
+    $categoryType = sanitize_string($_POST['category_type'] ?? '');
+    $ratePerSqm = sanitize_float($_POST['rate_per_sqm'] ?? 0);
+
+    if (empty($name) || empty($categoryType) || $ratePerSqm <= 0) {
+        return ['success' => false, 'error' => 'Udfyld venligst alle påkrævede felter'];
+    }
+
+    try {
+        db_update('opex_categories', [
+            'name' => $name,
+            'description' => $description,
+            'category_type' => $categoryType,
+            'rate_per_sqm' => $ratePerSqm
+        ], 'id = :id', ['id' => $categoryId]);
+
+        log_activity('opex_category_updated', 'opex_category', $categoryId);
+
+        return ['success' => true, 'message' => 'OPEX kategori opdateret'];
+    } catch (Exception $e) {
+        log_error('OPEX category update error: ' . $e->getMessage());
+        return ['success' => false, 'error' => 'Kunne ikke opdatere OPEX kategori'];
+    }
+}
+
+/**
+ * Toggle OPEX category active status (admin only)
+ */
+function toggleOpexCategory(array $user): array {
+    if (!has_permission($user, 'admin')) {
+        return ['success' => false, 'error' => 'Kun administratorer kan ændre OPEX kategori status'];
+    }
+
+    $categoryId = sanitize_int($_POST['category_id'] ?? 0);
+    $isActive = filter_var($_POST['is_active'] ?? true, FILTER_VALIDATE_BOOLEAN);
+
+    try {
+        db_update('opex_categories', [
+            'is_active' => $isActive
+        ], 'id = :id', ['id' => $categoryId]);
+
+        log_activity('opex_category_toggled', 'opex_category', $categoryId);
+
+        return ['success' => true, 'message' => $isActive ? 'Kategori aktiveret' : 'Kategori deaktiveret'];
+    } catch (Exception $e) {
+        log_error('OPEX category toggle error: ' . $e->getMessage());
+        return ['success' => false, 'error' => 'Kunne ikke ændre status'];
+    }
+}
+
+/**
+ * Update TCO configuration (admin only)
+ */
+function updateTcoConfig(array $user): array {
+    if (!has_permission($user, 'admin')) {
+        return ['success' => false, 'error' => 'Kun administratorer kan opdatere TCO konfiguration'];
+    }
+
+    $configs = $_POST['config'] ?? [];
+
+    if (empty($configs)) {
+        return ['success' => false, 'error' => 'Ingen konfiguration angivet'];
+    }
+
+    try {
+        foreach ($configs as $key => $value) {
+            db_update('tco_config', [
+                'config_value' => sanitize_float($value)
+            ], 'config_key = :key', ['key' => sanitize_string($key)]);
+        }
+
+        log_activity('tco_config_updated', 'tco_config', 0);
+
+        return ['success' => true, 'message' => 'TCO konfiguration opdateret'];
+    } catch (Exception $e) {
+        log_error('TCO config update error: ' . $e->getMessage());
+        return ['success' => false, 'error' => 'Kunne ikke opdatere konfiguration'];
+    }
+}
+
+/**
+ * Calculate Total Cost of Ownership for a building
+ */
+function calculateBuildingTco(array $user): array {
+    $buildingId = sanitize_int($_POST['building_id'] ?? $_GET['building_id'] ?? 0);
+
+    if (!$buildingId) {
+        return ['success' => false, 'error' => 'Building ID mangler'];
+    }
+
+    // Get building and verify access
+    $building = db_fetch("
+        SELECT b.*, p.user_id
+        FROM buildings b
+        JOIN projects p ON b.project_id = p.id
+        WHERE b.id = :id
+    ", ['id' => $buildingId]);
+
+    if (!$building) {
+        return ['success' => false, 'error' => 'Bygning ikke fundet'];
+    }
+
+    if (!has_permission($user, 'admin') && $building['user_id'] != $user['id']) {
+        return ['success' => false, 'error' => 'Ingen adgang'];
+    }
+
+    // Get TCO configuration
+    $tcoConfig = db_fetch_all("SELECT config_key, config_value FROM tco_config");
+    $config = [];
+    foreach ($tcoConfig as $item) {
+        $config[$item['config_key']] = (float)$item['config_value'];
+    }
+
+    $lifecycleYears = $config['lifecycle_years'] ?? 30;
+    $discountRate = $config['discount_rate'] ?? 0.03;
+    $inflationRate = $config['inflation_rate'] ?? 0.02;
+    $capexContingency = $config['capex_contingency'] ?? 0.10;
+    $opexEscalation = $config['opex_escalation'] ?? 0.025;
+
+    // Calculate CAPEX (sum of all building elements)
+    $capex = db_value("
+        SELECT COALESCE(SUM(capex), 0)
+        FROM building_elements
+        WHERE building_id = :building_id
+    ", ['building_id' => $buildingId]);
+
+    $capexWithContingency = $capex * (1 + $capexContingency);
+
+    // Calculate annual OPEX (based on building area and assigned categories)
+    $buildingArea = (float)($building['area'] ?? 0);
+    $opexPerYear = 0;
+
+    $assignedOpex = db_fetch_all("
+        SELECT bo.*, oc.rate_per_sqm,
+               COALESCE(bo.custom_rate_per_sqm, oc.rate_per_sqm) as effective_rate
+        FROM building_opex bo
+        JOIN opex_categories oc ON bo.opex_category_id = oc.id
+        WHERE bo.building_id = :building_id
+    ", ['building_id' => $buildingId]);
+
+    foreach ($assignedOpex as $opex) {
+        $opexPerYear += (float)$opex['effective_rate'] * $buildingArea;
+    }
+
+    // Calculate Net Present Value of OPEX over lifecycle
+    $opexNpv = 0;
+    for ($year = 1; $year <= $lifecycleYears; $year++) {
+        $yearOpex = $opexPerYear * pow(1 + $opexEscalation, $year - 1);
+        $discountFactor = pow(1 + $discountRate, $year);
+        $opexNpv += $yearOpex / $discountFactor;
+    }
+
+    // Total Cost of Ownership
+    $tco = $capexWithContingency + $opexNpv;
+
+    return [
+        'success' => true,
+        'tco' => [
+            'capex' => $capex,
+            'capex_with_contingency' => $capexWithContingency,
+            'opex_per_year' => $opexPerYear,
+            'opex_npv' => $opexNpv,
+            'tco' => $tco,
+            'lifecycle_years' => $lifecycleYears,
+            'discount_rate' => $discountRate,
+            'inflation_rate' => $inflationRate,
+            'capex_contingency' => $capexContingency,
+            'opex_escalation' => $opexEscalation
+        ]
+    ];
+}
+
+/* ========================================
+   RED FLAGS SYSTEM
+   ======================================== */
+
+/**
+ * Get red flags for projects with detailed analysis
+ */
+function getRedFlags(array $user): array {
+    $projectId = isset($_GET['project_id']) ? sanitize_int($_GET['project_id']) : null;
+
+    // Build WHERE clause based on permissions
+    $where = '';
+    $params = [];
+
+    if ($projectId) {
+        // Verify project access
+        $project = db_fetch("SELECT user_id FROM projects WHERE id = :id", ['id' => $projectId]);
+        if (!$project) {
+            return ['success' => false, 'error' => 'Projekt ikke fundet'];
+        }
+
+        if (!has_permission($user, 'admin') && $project['user_id'] != $user['id']) {
+            return ['success' => false, 'error' => 'Ingen adgang'];
+        }
+
+        $where = 'AND p.id = :project_id';
+        $params['project_id'] = $projectId;
+    } elseif (!has_permission($user, 'admin')) {
+        // Regular users see only their projects
+        $where = 'AND p.user_id = :user_id';
+        $params['user_id'] = $user['id'];
+    }
+
+    // Get all building elements with red flag indicators
+    $elements = db_fetch_all("
+        SELECT
+            be.*,
+            b.name as building_name,
+            b.id as building_id,
+            p.name as project_name,
+            p.id as project_id,
+            p.user_id as project_owner
+        FROM building_elements be
+        JOIN buildings b ON be.building_id = b.id
+        JOIN projects p ON b.project_id = p.id
+        WHERE 1=1 $where
+        ORDER BY
+            CASE be.urgency
+                WHEN 'critical' THEN 1
+                WHEN 'high' THEN 2
+                WHEN 'normal' THEN 3
+                WHEN 'low' THEN 4
+                ELSE 5
+            END,
+            be.capex DESC
+    ", $params);
+
+    $redFlags = [];
+
+    foreach ($elements as $element) {
+        $flags = [];
+        $severity = 'low';
+        $score = 0;
+
+        // Check urgency level
+        if (in_array($element['urgency'], ['critical', 'high'])) {
+            $flags[] = [
+                'type' => 'urgency',
+                'label' => 'Høj prioritet',
+                'description' => 'Element markeret som ' . ($element['urgency'] === 'critical' ? 'kritisk' : 'høj') . ' prioritet',
+                'severity' => $element['urgency']
+            ];
+            $score += $element['urgency'] === 'critical' ? 10 : 7;
+            $severity = $element['urgency'];
+        }
+
+        // Check condition
+        if (!empty($element['condition'])) {
+            $condition = strtolower($element['condition']);
+            if (in_array($condition, ['dårlig', 'kritisk', 'poor', 'critical'])) {
+                $flags[] = [
+                    'type' => 'condition',
+                    'label' => 'Dårlig tilstand',
+                    'description' => 'Element i dårlig eller kritisk tilstand',
+                    'severity' => 'high'
+                ];
+                $score += 8;
+                if ($severity !== 'critical') $severity = 'high';
+            }
+        }
+
+        // Check high CAPEX
+        $capex = (float)($element['capex'] ?? 0);
+        if ($capex > 500000) {
+            $flags[] = [
+                'type' => 'high_cost',
+                'label' => 'Høj omkostning',
+                'description' => 'CAPEX over 500.000 kr',
+                'severity' => 'normal'
+            ];
+            $score += 5;
+        }
+
+        // Check missing description
+        if (empty($element['description']) || strlen(trim($element['description'])) < 10) {
+            $flags[] = [
+                'type' => 'missing_data',
+                'label' => 'Manglende beskrivelse',
+                'description' => 'Element mangler detaljeret beskrivelse',
+                'severity' => 'low'
+            ];
+            $score += 2;
+        }
+
+        // Check missing quantity or unit
+        if (empty($element['quantity']) || (float)$element['quantity'] <= 0) {
+            $flags[] = [
+                'type' => 'missing_data',
+                'label' => 'Manglende mængde',
+                'description' => 'Element mangler mængdeangivelse',
+                'severity' => 'normal'
+            ];
+            $score += 3;
+        }
+
+        // Only include elements with at least one flag
+        if (!empty($flags)) {
+            $redFlags[] = [
+                'element' => $element,
+                'flags' => $flags,
+                'severity' => $severity,
+                'score' => $score
+            ];
+        }
+    }
+
+    // Sort by score (highest first)
+    usort($redFlags, function($a, $b) {
+        return $b['score'] - $a['score'];
+    });
+
+    return [
+        'success' => true,
+        'red_flags' => $redFlags,
+        'total_count' => count($redFlags)
+    ];
+}
+
+/**
+ * Get red flags summary with statistics
+ */
+function getRedFlagsSummary(array $user): array {
+    $projectId = isset($_GET['project_id']) ? sanitize_int($_GET['project_id']) : null;
+
+    // Build WHERE clause based on permissions
+    $where = '';
+    $params = [];
+
+    if ($projectId) {
+        // Verify project access
+        $project = db_fetch("SELECT user_id FROM projects WHERE id = :id", ['id' => $projectId]);
+        if (!$project) {
+            return ['success' => false, 'error' => 'Projekt ikke fundet'];
+        }
+
+        if (!has_permission($user, 'admin') && $project['user_id'] != $user['id']) {
+            return ['success' => false, 'error' => 'Ingen adgang'];
+        }
+
+        $where = 'AND p.id = :project_id';
+        $params['project_id'] = $projectId;
+    } elseif (!has_permission($user, 'admin')) {
+        // Regular users see only their projects
+        $where = 'AND p.user_id = :user_id';
+        $params['user_id'] = $user['id'];
+    }
+
+    // Get urgency statistics
+    $urgencyStats = db_fetch_all("
+        SELECT
+            be.urgency,
+            COUNT(*) as count,
+            COALESCE(SUM(be.capex), 0) as total_capex
+        FROM building_elements be
+        JOIN buildings b ON be.building_id = b.id
+        JOIN projects p ON b.project_id = p.id
+        WHERE be.urgency IN ('high', 'critical') $where
+        GROUP BY be.urgency
+    ", $params);
+
+    // Get condition statistics
+    $conditionStats = db_fetch_all("
+        SELECT
+            be.condition,
+            COUNT(*) as count,
+            COALESCE(SUM(be.capex), 0) as total_capex
+        FROM building_elements be
+        JOIN buildings b ON be.building_id = b.id
+        JOIN projects p ON b.project_id = p.id
+        WHERE be.condition IS NOT NULL
+        AND LOWER(be.condition) IN ('dårlig', 'kritisk', 'poor', 'critical')
+        $where
+        GROUP BY be.condition
+    ", $params);
+
+    // Get high cost items (> 500k)
+    $highCostCount = db_value("
+        SELECT COUNT(*)
+        FROM building_elements be
+        JOIN buildings b ON be.building_id = b.id
+        JOIN projects p ON b.project_id = p.id
+        WHERE be.capex > 500000 $where
+    ", $params);
+
+    $highCostCapex = db_value("
+        SELECT COALESCE(SUM(be.capex), 0)
+        FROM building_elements be
+        JOIN buildings b ON be.building_id = b.id
+        JOIN projects p ON b.project_id = p.id
+        WHERE be.capex > 500000 $where
+    ", $params);
+
+    // Get missing data statistics
+    $missingDescCount = db_value("
+        SELECT COUNT(*)
+        FROM building_elements be
+        JOIN buildings b ON be.building_id = b.id
+        JOIN projects p ON b.project_id = p.id
+        WHERE (be.description IS NULL OR LENGTH(TRIM(be.description)) < 10) $where
+    ", $params);
+
+    $missingQtyCount = db_value("
+        SELECT COUNT(*)
+        FROM building_elements be
+        JOIN buildings b ON be.building_id = b.id
+        JOIN projects p ON b.project_id = p.id
+        WHERE (be.quantity IS NULL OR be.quantity <= 0) $where
+    ", $params);
+
+    // Calculate total urgent CAPEX
+    $totalUrgentCapex = 0;
+    foreach ($urgencyStats as $stat) {
+        $totalUrgentCapex += (float)$stat['total_capex'];
+    }
+
+    // Calculate total poor condition CAPEX
+    $totalPoorConditionCapex = 0;
+    foreach ($conditionStats as $stat) {
+        $totalPoorConditionCapex += (float)$stat['total_capex'];
+    }
+
+    // Count total red flags
+    $criticalCount = 0;
+    $highCount = 0;
+    foreach ($urgencyStats as $stat) {
+        if ($stat['urgency'] === 'critical') {
+            $criticalCount = (int)$stat['count'];
+        } elseif ($stat['urgency'] === 'high') {
+            $highCount = (int)$stat['count'];
+        }
+    }
+
+    $summary = [
+        'urgency' => [
+            'critical' => [
+                'count' => $criticalCount,
+                'capex' => 0
+            ],
+            'high' => [
+                'count' => $highCount,
+                'capex' => 0
+            ]
+        ],
+        'condition' => [
+            'poor_condition_count' => count($conditionStats) > 0 ? array_sum(array_column($conditionStats, 'count')) : 0,
+            'poor_condition_capex' => $totalPoorConditionCapex
+        ],
+        'costs' => [
+            'high_cost_count' => (int)$highCostCount,
+            'high_cost_capex' => (float)$highCostCapex
+        ],
+        'data_quality' => [
+            'missing_description' => (int)$missingDescCount,
+            'missing_quantity' => (int)$missingQtyCount
+        ],
+        'totals' => [
+            'total_urgent_items' => $criticalCount + $highCount,
+            'total_urgent_capex' => $totalUrgentCapex
+        ]
+    ];
+
+    // Fill in CAPEX for urgency levels
+    foreach ($urgencyStats as $stat) {
+        if ($stat['urgency'] === 'critical') {
+            $summary['urgency']['critical']['capex'] = (float)$stat['total_capex'];
+        } elseif ($stat['urgency'] === 'high') {
+            $summary['urgency']['high']['capex'] = (float)$stat['total_capex'];
+        }
+    }
+
+    return [
+        'success' => true,
+        'summary' => $summary
+    ];
 }
