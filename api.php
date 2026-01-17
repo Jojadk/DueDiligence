@@ -120,6 +120,16 @@ try {
             echo json_encode(markNotificationRead($currentUser));
             break;
 
+        // Report Tree Structure
+        case 'get_project_tree':
+            echo json_encode(getProjectTree($currentUser));
+            break;
+
+        case 'update_element_hierarchy':
+            csrf_require();
+            echo json_encode(updateElementHierarchy($currentUser));
+            break;
+
         // Global Search
         case 'search':
             echo json_encode(globalSearch($currentUser));
@@ -774,4 +784,166 @@ function globalSearch(array $user): array {
     }
 
     return ['success' => true, 'data' => $results];
+}
+
+/* ========================================
+   REPORT TREE STRUCTURE
+   ======================================== */
+
+function getProjectTree(array $user): array {
+    $projectId = sanitize_int($_GET['project_id'] ?? 0);
+
+    // Verify ownership
+    if (!has_permission($user, 'admin') && !user_owns_project($user['id'], $projectId)) {
+        return ['success' => false, 'error' => 'Ingen adgang til dette projekt'];
+    }
+
+    // Get project info
+    $project = db_fetch("SELECT name FROM projects WHERE id = :id", ['id' => $projectId]);
+
+    if (!$project) {
+        return ['success' => false, 'error' => 'Projekt ikke fundet'];
+    }
+
+    // Get all buildings for this project
+    $buildings = db_query("
+        SELECT id, name
+        FROM buildings
+        WHERE project_id = :pid
+        ORDER BY sort_order, name
+    ", ['pid' => $projectId]);
+
+    $projectTotal = 0;
+
+    // For each building, get hierarchical elements
+    foreach ($buildings as &$building) {
+        $building['elements'] = getElementHierarchy($building['id']);
+        $building['total_capex'] = calculateBuildingTotal($building['elements']);
+        $building['element_count'] = countElements($building['elements']);
+        $projectTotal += $building['total_capex'];
+    }
+
+    return [
+        'success' => true,
+        'tree' => [
+            'project_name' => $project['name'],
+            'buildings' => $buildings,
+            'total_capex' => $projectTotal
+        ]
+    ];
+}
+
+/**
+ * Get hierarchical elements for a building
+ */
+function getElementHierarchy(int $buildingId, ?int $parentId = null): array {
+    $query = "
+        SELECT id, name, parent_id, element_type, location, condition_score,
+               urgency, time_horizon, capex, replacement_value, unit, quantity,
+               sort_order
+        FROM building_elements
+        WHERE building_id = :bid AND " . ($parentId ? "parent_id = :pid" : "parent_id IS NULL") . "
+        ORDER BY COALESCE(sort_order, 999999), name
+    ";
+
+    $params = ['bid' => $buildingId];
+    if ($parentId) {
+        $params['pid'] = $parentId;
+    }
+
+    $elements = db_query($query, $params);
+
+    // Recursively get children
+    foreach ($elements as &$element) {
+        $element['children'] = getElementHierarchy($buildingId, $element['id']);
+
+        // Calculate total CAPEX including children
+        $childrenTotal = 0;
+        foreach ($element['children'] as $child) {
+            $childrenTotal += $child['total_capex'] ?? $child['capex'] ?? 0;
+        }
+        $element['total_capex'] = ($element['capex'] ?? 0) + $childrenTotal;
+    }
+
+    return $elements;
+}
+
+/**
+ * Calculate total CAPEX for building from element hierarchy
+ */
+function calculateBuildingTotal(array $elements): float {
+    $total = 0;
+    foreach ($elements as $element) {
+        $total += $element['total_capex'] ?? $element['capex'] ?? 0;
+    }
+    return $total;
+}
+
+/**
+ * Count all elements recursively
+ */
+function countElements(array $elements): int {
+    $count = count($elements);
+    foreach ($elements as $element) {
+        if (!empty($element['children'])) {
+            $count += countElements($element['children']);
+        }
+    }
+    return $count;
+}
+
+/**
+ * Update element hierarchy (parent and order)
+ */
+function updateElementHierarchy(array $user): array {
+    if (!has_permission($user, 'edit_elements')) {
+        return ['success' => false, 'error' => 'Ingen tilladelse'];
+    }
+
+    $elementId = sanitize_int($_POST['element_id'] ?? 0);
+    $newParentId = !empty($_POST['parent_id']) ? sanitize_int($_POST['parent_id']) : null;
+    $order = json_decode($_POST['order'] ?? '[]', true);
+
+    // Get element and verify ownership
+    $element = db_fetch("
+        SELECT be.*, p.user_id
+        FROM building_elements be
+        JOIN buildings b ON be.building_id = b.id
+        JOIN projects p ON b.project_id = p.id
+        WHERE be.id = :id
+    ", ['id' => $elementId]);
+
+    if (!$element) {
+        return ['success' => false, 'error' => 'Element ikke fundet'];
+    }
+
+    // Verify ownership
+    if (!has_permission($user, 'admin') && $element['user_id'] != $user['id']) {
+        return ['success' => false, 'error' => 'Ingen adgang'];
+    }
+
+    // Update hierarchy in transaction
+    db_begin_transaction();
+    try {
+        // Update parent
+        db_update('building_elements', [
+            'parent_id' => $newParentId
+        ], 'id = :id', ['id' => $elementId]);
+
+        // Update sort order for all siblings
+        foreach ($order as $index => $id) {
+            db_update('building_elements', [
+                'sort_order' => $index
+            ], 'id = :id', ['id' => sanitize_int($id)]);
+        }
+
+        db_commit();
+        log_activity('element_hierarchy_updated', 'building_element', $elementId);
+
+        return ['success' => true];
+    } catch (Exception $e) {
+        db_rollback();
+        log_error('Hierarchy update error: ' . $e->getMessage());
+        return ['success' => false, 'error' => 'Kunne ikke opdatere hierarki'];
+    }
 }

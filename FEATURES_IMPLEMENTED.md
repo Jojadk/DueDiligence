@@ -319,3 +319,107 @@ php migrations/run_migration.php add_sort_order_to_building_elements.sql
 4. **Database**: Indexes added for sort_order column
 5. **API**: Response caching where appropriate
 6. **Transactions**: Used for multi-step operations to ensure consistency
+
+## 9. Hierarchical Tree Structure for Reports ✅
+
+**Location:**
+- `assets/js/report-tree.js` - Tree view component
+- `assets/css/report-tree.css` - Tree styling  
+- `api.php` - Tree data endpoints (get_project_tree, update_element_hierarchy)
+
+### Features:
+- Hierarchical tree view with buildings at the top
+- Building elements organized in parent-child relationships
+- Multiple buildings supported (Building 1, Building 2, etc.)
+- Drag-and-drop sorting within tree structure  
+- Move elements between parents via drag-drop
+- Automatic cost summation up the hierarchy
+- Units, quantities, and subtotals displayed for each element
+- Building totals calculated from all child elements
+- Project-wide total CAPEX summary in header
+
+### Tree Structure Example:
+```
+Project Name (Total CAPEX: 5.000.000 kr)
+├── Bygning 1 (2.500.000 kr) [12 elementer]
+│   ├── Udendørsarealer
+│   │   └── Belægning (500.000 kr)
+│   └── Overflader  
+│       ├── Trægulve (800.000 kr)
+│       └── Klinker (400.000 kr)
+└── Bygning 2 (2.500.000 kr) [8 elementer]
+    └── Facader (1.200.000 kr)
+```
+
+### API Endpoints:
+- `get_project_tree` - Get hierarchical tree structure with calculated totals
+- `update_element_hierarchy` - Update parent/child relationships and sort order
+
+### Key Features:
+1. **Hierarchical Display** - Nested tree with unlimited depth
+2. **Expandable/Collapsible** - Click chevron to expand/collapse branches  
+3. **Drag-Drop Reordering** - Drag elements to reorder within same parent
+4. **Move Between Parents** - Drag elements to different parents in tree
+5. **Automatic Calculations** - Element costs roll up to parent subtotals
+6. **Visual Indicators** - Building icons, element icons, urgency badges
+7. **Inline Actions** - Edit button on hover for quick access
+8. **Responsive Design** - Mobile-friendly tree layout
+
+### Cost Summation Logic:
+- Each element displays its CAPEX value
+- Parent elements show subtotal = own CAPEX + sum of all children  
+- Buildings show total = sum of all root elements and their descendants
+- Project header shows grand total across all buildings
+- Real-time recalculation after drag-drop hierarchy changes
+
+### Visual Elements:
+- **Buildings** - Blue header with white text, building icon
+- **Elements** - Nested with indentation, left border, box icon
+- **Drag Handles** - Visible on hover for sorting
+- **Urgency Badges** - Color-coded (low/normal/high/critical)
+- **Stats Display** - Units, quantities, and costs aligned right
+- **Toggle Buttons** - Chevron icons for expand/collapse
+
+### Responsive Behavior:
+- Desktop: Full stats inline with labels
+- Mobile: Stats stacked vertically, reduced indentation
+- Print: Drag handles and buttons hidden automatically
+
+### Usage Example:
+```javascript
+// Initialize tree for a project
+ReportTree.init(123, '.report-tree-container');
+
+// Tree will:
+// 1. Load hierarchical data from API
+// 2. Calculate all subtotals automatically  
+// 3. Render expandable tree view
+// 4. Enable drag-drop sorting
+// 5. Update backend on hierarchy changes
+```
+
+### Database Support:
+Uses existing schema features:
+- `building_elements.parent_id` - Parent-child relationships
+- `building_elements.sort_order` - Ordering within parent
+- `building_elements.capex` - Element costs for summation
+- `building_elements.unit` - Unit type (m², stk, etc.)
+- `building_elements.quantity` - Quantity for calculations
+
+### Integration Points:
+- Can be embedded in any project/building view page
+- Automatically handles permissions and ownership
+- Updates sync with main building_element module
+- Click edit opens element in main module form
+
+## Testing Checklist Additions
+
+- [ ] Test tree view loads correctly with multiple buildings
+- [ ] Test expand/collapse functionality  
+- [ ] Test drag-drop reordering within same parent
+- [ ] Test drag-drop moving element to different parent
+- [ ] Test cost totals calculate correctly up hierarchy
+- [ ] Test tree view on mobile devices
+- [ ] Test edit button opens element form
+- [ ] Test tree view with viewer permissions (read-only)
+- [ ] Test tree updates after element edits in main module
