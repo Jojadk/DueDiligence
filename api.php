@@ -206,6 +206,38 @@ try {
             echo json_encode(getRedFlagsSummary($currentUser));
             break;
 
+        // Budget System
+        case 'search_price_catalog':
+            echo json_encode(searchPriceCatalog($currentUser));
+            break;
+
+        case 'get_budget_templates':
+            echo json_encode(getBudgetTemplates($currentUser));
+            break;
+
+        case 'load_budget_template':
+            csrf_require();
+            echo json_encode(loadBudgetTemplate($currentUser));
+            break;
+
+        case 'get_budget_lines':
+            echo json_encode(getBudgetLines($currentUser));
+            break;
+
+        case 'save_budget_lines':
+            csrf_require();
+            echo json_encode(saveBudgetLines($currentUser));
+            break;
+
+        case 'delete_budget_line':
+            csrf_require();
+            echo json_encode(deleteBudgetLine($currentUser));
+            break;
+
+        case 'calculate_budget_total':
+            echo json_encode(calculateBudgetTotal($currentUser));
+            break;
+
         default:
             http_response_code(404);
             echo json_encode(['success' => false, 'error' => 'Action not found']);
@@ -1810,5 +1842,394 @@ function getRedFlagsSummary(array $user): array {
     return [
         'success' => true,
         'summary' => $summary
+    ];
+}
+
+/* ========================================
+   BUDGET SYSTEM (CAPEX/OPEX/REINSTATEMENT)
+   ======================================== */
+
+/**
+ * Search price catalog
+ */
+function searchPriceCatalog(array $user): array {
+    $query = sanitize_string($_GET['q'] ?? '');
+    $category = sanitize_string($_GET['category'] ?? '');
+
+    $where = ['is_active = true'];
+    $params = [];
+
+    if (!empty($query)) {
+        // Search in name, description, or tags
+        $where[] = "(name ILIKE :query OR description ILIKE :query OR :query_tag = ANY(tags))";
+        $params['query'] = '%' . $query . '%';
+        $params['query_tag'] = $query;
+    }
+
+    if (!empty($category)) {
+        $where[] = "category = :category";
+        $params['category'] = $category;
+    }
+
+    $whereClause = implode(' AND ', $where);
+
+    $items = db_fetch_all("
+        SELECT *
+        FROM price_catalog
+        WHERE $whereClause
+        ORDER BY category, name
+        LIMIT 50
+    ", $params);
+
+    return [
+        'success' => true,
+        'items' => $items
+    ];
+}
+
+/**
+ * Get available budget templates
+ */
+function getBudgetTemplates(array $user): array {
+    $category = sanitize_string($_GET['category'] ?? '');
+
+    $where = ['(is_public = true OR created_by = :user_id)'];
+    $params = ['user_id' => $user['id']];
+
+    if (!empty($category)) {
+        $where[] = "category = :category";
+        $params['category'] = $category;
+    }
+
+    $whereClause = implode(' AND ', $where);
+
+    $templates = db_fetch_all("
+        SELECT *
+        FROM budget_templates
+        WHERE $whereClause
+        ORDER BY is_public DESC, name
+    ", $params);
+
+    return [
+        'success' => true,
+        'templates' => $templates
+    ];
+}
+
+/**
+ * Load budget template and apply to element
+ */
+function loadBudgetTemplate(array $user): array {
+    if (!has_permission($user, 'edit_elements')) {
+        return ['success' => false, 'error' => 'Ingen tilladelse'];
+    }
+
+    $templateId = sanitize_int($_POST['template_id'] ?? 0);
+    $elementId = sanitize_int($_POST['element_id'] ?? 0);
+    $budgetType = sanitize_string($_POST['budget_type'] ?? 'capex');
+
+    // Get template
+    $template = db_fetch("
+        SELECT *
+        FROM budget_templates
+        WHERE id = :id AND (is_public = true OR created_by = :user_id)
+    ", ['id' => $templateId, 'user_id' => $user['id']]);
+
+    if (!$template) {
+        return ['success' => false, 'error' => 'Template ikke fundet'];
+    }
+
+    // Verify element ownership
+    $element = db_fetch("
+        SELECT be.*, p.user_id
+        FROM building_elements be
+        JOIN buildings b ON be.building_id = b.id
+        JOIN projects p ON b.project_id = p.id
+        WHERE be.id = :id
+    ", ['id' => $elementId]);
+
+    if (!$element) {
+        return ['success' => false, 'error' => 'Element ikke fundet'];
+    }
+
+    if (!has_permission($user, 'admin') && $element['user_id'] != $user['id']) {
+        return ['success' => false, 'error' => 'Ingen adgang'];
+    }
+
+    // Parse template data
+    $templateData = json_decode($template['template_data'], true);
+
+    if (!is_array($templateData)) {
+        return ['success' => false, 'error' => 'Ugyldig template data'];
+    }
+
+    // Get current max line number
+    $maxLine = db_value("
+        SELECT COALESCE(MAX(line_number), -1)
+        FROM budget_lines
+        WHERE element_id = :element_id AND budget_type = :budget_type
+    ", ['element_id' => $elementId, 'budget_type' => $budgetType]);
+
+    // Insert template lines
+    $insertedCount = 0;
+    foreach ($templateData as $index => $line) {
+        $lineNumber = $maxLine + 1 + $index;
+
+        db_insert('budget_lines', [
+            'element_id' => $elementId,
+            'budget_type' => $budgetType,
+            'line_number' => $lineNumber,
+            'description' => $line['description'] ?? '',
+            'quantity' => $line['quantity'] ?? 0,
+            'unit' => $line['unit'] ?? 'stk',
+            'price_per_unit' => $line['price_per_unit'] ?? 0,
+            'year_0_1' => $line['year_0_1'] ?? 0,
+            'year_1_2' => $line['year_1_2'] ?? 0,
+            'year_3_5' => $line['year_3_5'] ?? 0,
+            'year_5_10' => $line['year_5_10'] ?? 0,
+            'year_10_plus' => $line['year_10_plus'] ?? 0
+        ]);
+
+        $insertedCount++;
+    }
+
+    log_activity('budget_template_loaded', 'building_element', $elementId);
+
+    return [
+        'success' => true,
+        'message' => "$insertedCount linjer indlæst fra template",
+        'inserted_count' => $insertedCount
+    ];
+}
+
+/**
+ * Get budget lines for an element
+ */
+function getBudgetLines(array $user): array {
+    $elementId = sanitize_int($_GET['element_id'] ?? 0);
+    $budgetType = sanitize_string($_GET['budget_type'] ?? 'capex');
+
+    if (!$elementId) {
+        return ['success' => false, 'error' => 'Element ID mangler'];
+    }
+
+    // Verify element access
+    $element = db_fetch("
+        SELECT be.*, p.user_id
+        FROM building_elements be
+        JOIN buildings b ON be.building_id = b.id
+        JOIN projects p ON b.project_id = p.id
+        WHERE be.id = :id
+    ", ['id' => $elementId]);
+
+    if (!$element) {
+        return ['success' => false, 'error' => 'Element ikke fundet'];
+    }
+
+    if (!has_permission($user, 'admin') && $element['user_id'] != $user['id']) {
+        return ['success' => false, 'error' => 'Ingen adgang'];
+    }
+
+    // Get budget lines
+    $lines = db_fetch_all("
+        SELECT bl.*, pc.name as catalog_item_name
+        FROM budget_lines bl
+        LEFT JOIN price_catalog pc ON bl.price_catalog_id = pc.id
+        WHERE bl.element_id = :element_id AND bl.budget_type = :budget_type
+        ORDER BY bl.line_number
+    ", ['element_id' => $elementId, 'budget_type' => $budgetType]);
+
+    return [
+        'success' => true,
+        'lines' => $lines
+    ];
+}
+
+/**
+ * Save budget lines (batch update/insert)
+ */
+function saveBudgetLines(array $user): array {
+    if (!has_permission($user, 'edit_elements')) {
+        return ['success' => false, 'error' => 'Ingen tilladelse'];
+    }
+
+    $elementId = sanitize_int($_POST['element_id'] ?? 0);
+    $budgetType = sanitize_string($_POST['budget_type'] ?? 'capex');
+    $lines = json_decode($_POST['lines'] ?? '[]', true);
+
+    if (!is_array($lines)) {
+        return ['success' => false, 'error' => 'Ugyldige linjedata'];
+    }
+
+    // Verify element ownership
+    $element = db_fetch("
+        SELECT be.*, p.user_id
+        FROM building_elements be
+        JOIN buildings b ON be.building_id = b.id
+        JOIN projects p ON b.project_id = p.id
+        WHERE be.id = :id
+    ", ['id' => $elementId]);
+
+    if (!$element) {
+        return ['success' => false, 'error' => 'Element ikke fundet'];
+    }
+
+    if (!has_permission($user, 'admin') && $element['user_id'] != $user['id']) {
+        return ['success' => false, 'error' => 'Ingen adgang'];
+    }
+
+    db_begin_transaction();
+    try {
+        foreach ($lines as $index => $line) {
+            $lineData = [
+                'element_id' => $elementId,
+                'budget_type' => $budgetType,
+                'line_number' => $index,
+                'description' => sanitize_string($line['description'] ?? ''),
+                'quantity' => sanitize_float($line['quantity'] ?? 0),
+                'unit' => sanitize_string($line['unit'] ?? 'stk'),
+                'price_per_unit' => sanitize_float($line['price_per_unit'] ?? 0),
+                'year_0_1' => sanitize_float($line['year_0_1'] ?? 0),
+                'year_1_2' => sanitize_float($line['year_1_2'] ?? 0),
+                'year_3_5' => sanitize_float($line['year_3_5'] ?? 0),
+                'year_5_10' => sanitize_float($line['year_5_10'] ?? 0),
+                'year_10_plus' => sanitize_float($line['year_10_plus'] ?? 0),
+                'price_catalog_id' => !empty($line['price_catalog_id']) ? sanitize_int($line['price_catalog_id']) : null,
+                'notes' => sanitize_string($line['notes'] ?? '')
+            ];
+
+            if (!empty($line['id'])) {
+                // Update existing line
+                $id = sanitize_int($line['id']);
+                db_update('budget_lines', $lineData, 'id = :id AND element_id = :element_id', [
+                    'id' => $id,
+                    'element_id' => $elementId
+                ]);
+            } else {
+                // Insert new line
+                db_insert('budget_lines', $lineData);
+            }
+        }
+
+        // Update element's total CAPEX/OPEX based on budget type
+        $total = 0;
+        foreach ($lines as $line) {
+            $qty = (float)($line['quantity'] ?? 0);
+            $price = (float)($line['price_per_unit'] ?? 0);
+            $total += $qty * $price;
+        }
+
+        if ($budgetType === 'capex') {
+            db_update('building_elements', ['capex' => $total], 'id = :id', ['id' => $elementId]);
+        }
+
+        db_commit();
+        log_activity('budget_lines_saved', 'building_element', $elementId);
+
+        return [
+            'success' => true,
+            'message' => 'Budget linjer gemt',
+            'total' => $total
+        ];
+    } catch (Exception $e) {
+        db_rollback();
+        log_error('Budget save error: ' . $e->getMessage());
+        return ['success' => false, 'error' => 'Kunne ikke gemme budget'];
+    }
+}
+
+/**
+ * Delete a budget line
+ */
+function deleteBudgetLine(array $user): array {
+    if (!has_permission($user, 'edit_elements')) {
+        return ['success' => false, 'error' => 'Ingen tilladelse'];
+    }
+
+    $lineId = sanitize_int($_POST['line_id'] ?? 0);
+
+    // Get line and verify ownership
+    $line = db_fetch("
+        SELECT bl.*, p.user_id
+        FROM budget_lines bl
+        JOIN building_elements be ON bl.element_id = be.id
+        JOIN buildings b ON be.building_id = b.id
+        JOIN projects p ON b.project_id = p.id
+        WHERE bl.id = :id
+    ", ['id' => $lineId]);
+
+    if (!$line) {
+        return ['success' => false, 'error' => 'Linje ikke fundet'];
+    }
+
+    if (!has_permission($user, 'admin') && $line['user_id'] != $user['id']) {
+        return ['success' => false, 'error' => 'Ingen adgang'];
+    }
+
+    try {
+        db_delete('budget_lines', 'id = :id', ['id' => $lineId]);
+
+        log_activity('budget_line_deleted', 'budget_line', $lineId);
+
+        return ['success' => true, 'message' => 'Linje slettet'];
+    } catch (Exception $e) {
+        log_error('Budget line delete error: ' . $e->getMessage());
+        return ['success' => false, 'error' => 'Kunne ikke slette linje'];
+    }
+}
+
+/**
+ * Calculate budget total for an element
+ */
+function calculateBudgetTotal(array $user): array {
+    $elementId = sanitize_int($_GET['element_id'] ?? 0);
+    $budgetType = sanitize_string($_GET['budget_type'] ?? 'capex');
+
+    if (!$elementId) {
+        return ['success' => false, 'error' => 'Element ID mangler'];
+    }
+
+    // Verify access
+    $element = db_fetch("
+        SELECT be.*, p.user_id
+        FROM building_elements be
+        JOIN buildings b ON be.building_id = b.id
+        JOIN projects p ON b.project_id = p.id
+        WHERE be.id = :id
+    ", ['id' => $elementId]);
+
+    if (!$element) {
+        return ['success' => false, 'error' => 'Element ikke fundet'];
+    }
+
+    if (!has_permission($user, 'admin') && $element['user_id'] != $user['id']) {
+        return ['success' => false, 'error' => 'Ingen adgang'];
+    }
+
+    // Calculate totals
+    $result = db_fetch("
+        SELECT
+            COUNT(*) as line_count,
+            COALESCE(SUM(quantity * price_per_unit), 0) as total,
+            COALESCE(SUM(year_0_1), 0) as total_year_0_1,
+            COALESCE(SUM(year_1_2), 0) as total_year_1_2,
+            COALESCE(SUM(year_3_5), 0) as total_year_3_5,
+            COALESCE(SUM(year_5_10), 0) as total_year_5_10,
+            COALESCE(SUM(year_10_plus), 0) as total_year_10_plus
+        FROM budget_lines
+        WHERE element_id = :element_id AND budget_type = :budget_type
+    ", ['element_id' => $elementId, 'budget_type' => $budgetType]);
+
+    return [
+        'success' => true,
+        'totals' => [
+            'line_count' => (int)$result['line_count'],
+            'total' => (float)$result['total'],
+            'year_0_1' => (float)$result['total_year_0_1'],
+            'year_1_2' => (float)$result['total_year_1_2'],
+            'year_3_5' => (float)$result['total_year_3_5'],
+            'year_5_10' => (float)$result['total_year_5_10'],
+            'year_10_plus' => (float)$result['total_year_10_plus']
+        ]
     ];
 }

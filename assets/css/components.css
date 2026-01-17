@@ -915,3 +915,134 @@
         overflow: visible;
     }
 }
+
+/* ========================================
+   BUDGET MODAL STYLES
+   ======================================== */
+
+.modal-large {
+    max-width: 1200px;
+    width: 95vw;
+    max-height: 90vh;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+}
+
+.modal-large .modal-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 1.5rem;
+}
+
+.budget-toolbar {
+    display: flex;
+    gap: 0.5rem;
+    margin-bottom: 1rem;
+    padding-bottom: 1rem;
+    border-bottom: 1px solid var(--color-gray-300);
+}
+
+.budget-table-container {
+    overflow-x: auto;
+    border: 1px solid var(--color-gray-300);
+    border-radius: 4px;
+}
+
+.budget-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.875rem;
+}
+
+.budget-table thead th {
+    background: var(--color-gray-100);
+    padding: 0.75rem 0.5rem;
+    text-align: left;
+    font-weight: 600;
+    border-bottom: 2px solid var(--color-gray-300);
+    white-space: nowrap;
+}
+
+.budget-table tbody td {
+    padding: 0.5rem;
+    border-bottom: 1px solid var(--color-gray-200);
+    vertical-align: middle;
+}
+
+.budget-table tbody tr:hover {
+    background: var(--color-gray-50);
+}
+
+.budget-table tfoot {
+    background: var(--color-gray-100);
+    font-weight: bold;
+}
+
+.budget-table tfoot td {
+    padding: 0.75rem 0.5rem;
+    border-top: 2px solid var(--color-gray-400);
+}
+
+.budget-table .form-control-sm {
+    padding: 0.25rem 0.5rem;
+    font-size: 0.875rem;
+    height: auto;
+    border: 1px solid var(--color-gray-300);
+}
+
+.budget-table .form-control-sm:focus {
+    outline: none;
+    border-color: var(--color-primary);
+    box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.1);
+}
+
+.budget-table .text-right {
+    text-align: right;
+}
+
+.budget-table .phase-input {
+    background: #f0f9ff;
+}
+
+.budget-table .total-row {
+    background: var(--color-gray-100);
+}
+
+.price-catalog-search {
+    padding: 1rem 0;
+}
+
+.templates-list {
+    max-height: 500px;
+    overflow-y: auto;
+}
+
+.template-card {
+    transition: box-shadow 0.2s ease;
+}
+
+.template-card:hover {
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+/* Responsive budget table */
+@media (max-width: 1024px) {
+    .modal-large {
+        width: 98vw;
+    }
+
+    .budget-table {
+        font-size: 0.8rem;
+    }
+
+    .budget-table thead th,
+    .budget-table tbody td,
+    .budget-table tfoot td {
+        padding: 0.4rem 0.3rem;
+    }
+
+    .budget-table .form-control-sm {
+        font-size: 0.8rem;
+    }
+}
