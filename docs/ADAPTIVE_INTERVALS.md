@@ -34,36 +34,39 @@ Når vinduet bliver aktivt igen eller modal lukker:
 
 ## API Reference
 
-### LiveUpdateManager
+### CollaborationManager
+
+**Note:** Systemet er nu unified - `LiveUpdateManager` og `LockManager` er konsolideret til `CollaborationManager`.
 
 ```javascript
-const liveUpdate = new LiveUpdateManager({
+const collab = new CollaborationManager({
     recordType: 'budget_template_items',
     recordId: templateId,
-    pollInterval: 3000,         // Aktivt interval (ms)
-    pollIntervalInactive: 30000, // Inaktivt interval (ms)
-    onUpdate: (changes) => { ... }
+    syncInterval: 3000,              // Aktivt sync interval (ms)
+    syncIntervalInactive: 30000,     // Inaktivt sync interval (ms)
+    heartbeatInterval: 30000,        // Aktivt heartbeat (ms)
+    heartbeatIntervalInactive: 60000, // Inaktivt heartbeat (ms)
+    onUpdate: (data) => {
+        // data.changes - Record ændringer
+        // data.locks - Lock status
+        // data.notifications - Bruger notifikationer
+    }
 });
 
-liveUpdate.start();
+collab.enableLocking('.editable');
+collab.start();
 ```
 
 **Options:**
-- `pollInterval` - Polling interval når vinduet er aktivt (default: 3000ms = 3 sek)
-- `pollIntervalInactive` - Polling interval når vinduet er inaktivt (default: 30000ms = 30 sek)
-
-### LockManager
-
-```javascript
-const lockManager = new LockManager({
-    heartbeatInterval: 30000,         // Aktivt interval (ms)
-    heartbeatIntervalInactive: 60000, // Inaktivt interval (ms)
-});
-```
-
-**Options:**
+- `syncInterval` - Unified sync interval når vinduet er aktivt (default: 3000ms = 3 sek)
+- `syncIntervalInactive` - Unified sync interval når vinduet er inaktivt (default: 30000ms = 30 sek)
 - `heartbeatInterval` - Heartbeat interval når vinduet er aktivt (default: 30000ms = 30 sek)
 - `heartbeatIntervalInactive` - Heartbeat interval når vinduet er inaktivt (default: 60000ms = 60 sek)
+
+**Benefits:**
+- Single API call per sync (kombinerer lock status, changes, notifications)
+- Simplere initialisering - én manager i stedet for to
+- Se [COLLABORATION_SYSTEM.md](./COLLABORATION_SYSTEM.md) for komplet dokumentation
 
 ---
 
@@ -191,12 +194,8 @@ ModalManager.reset();
 ### 1. Include Scripts i Rækkefølge
 
 ```html
-<!-- Core scripts -->
-<script src="/js/lock-manager.js"></script>
-<script src="/js/live-update.js"></script>
-
-<!-- Modal manager (optional, hvis du bruger custom modals) -->
-<script src="/js/modal-manager.js"></script>
+<!-- Unified collaboration system (erstatter lock-manager, live-update, modal-manager) -->
+<script src="/js/collaboration.js"></script>
 ```
 
 ### 2. Custom Intervals
@@ -205,29 +204,37 @@ For specifikke use cases kan du justere intervals:
 
 ```javascript
 // Meget kritisk data - poll oftere
-const criticalUpdate = new LiveUpdateManager({
+const criticalCollab = new CollaborationManager({
     recordType: 'critical_data',
-    pollInterval: 1000,         // 1 sekund aktiv
-    pollIntervalInactive: 10000 // 10 sekunder inaktiv
+    syncInterval: 1000,              // 1 sekund aktiv
+    syncIntervalInactive: 10000,     // 10 sekunder inaktiv
+    heartbeatInterval: 20000,
+    heartbeatIntervalInactive: 40000
 });
 
 // Mindre kritisk data - poll sjældnere
-const lowPriorityUpdate = new LiveUpdateManager({
+const lowPriorityCollab = new CollaborationManager({
     recordType: 'low_priority',
-    pollInterval: 10000,        // 10 sekunder aktiv
-    pollIntervalInactive: 60000 // 1 minut inaktiv
+    syncInterval: 10000,             // 10 sekunder aktiv
+    syncIntervalInactive: 60000,     // 1 minut inaktiv
+    heartbeatInterval: 60000,
+    heartbeatIntervalInactive: 120000
 });
 ```
 
 ### 3. Cleanup
 
-Husk altid at stoppe managers ved navigation:
+Cleanup sker automatisk ved beforeunload (built-in):
 
 ```javascript
-window.addEventListener('beforeunload', () => {
-    lockManager.destroy();
-    liveUpdate.stop();
-});
+// Automatisk cleanup (intet ekstra nødvendigt)
+// collab.destroy() kaldes automatisk ved beforeunload
+
+// Manuel cleanup for SPA (hvis nødvendigt)
+function navigateAway() {
+    collab.destroy();
+    // ... navigation logic
+}
 ```
 
 ---
@@ -245,13 +252,15 @@ setInterval(() => {
 
 **Efter:**
 ```javascript
-const liveUpdate = new LiveUpdateManager({
+const collab = new CollaborationManager({
     recordType: 'your_type',
-    onUpdate: (changes) => {
-        handleUpdates(changes);
+    onUpdate: (data) => {
+        handleUpdates(data.changes);        // Ændringer
+        handleLocks(data.locks);            // Lock status
+        handleNotifications(data.notifications); // Notifikationer
     }
 });
-liveUpdate.start();
+collab.start();
 ```
 
 ### Eksisterende Modal Systemer

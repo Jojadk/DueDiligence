@@ -67,31 +67,154 @@ function db(): PDO {
 }
 
 /**
- * Execute a query and return results
+ * Query result cache
  */
-function db_query(string $sql, array $params = []): array {
-    $stmt = db()->prepare($sql);
-    $stmt->execute($params);
-    return $stmt->fetchAll();
+class QueryCache {
+    private static $cache = [];
+    private static $ttl = 300; // 5 minutes default
+    private static $enabled = true;
+
+    public static function get(string $key) {
+        if (!self::$enabled) return null;
+
+        if (isset(self::$cache[$key])) {
+            $cached = self::$cache[$key];
+            if ($cached['expires'] > time()) {
+                return $cached['data'];
+            }
+            unset(self::$cache[$key]);
+        }
+        return null;
+    }
+
+    public static function set(string $key, $data, int $ttl = null): void {
+        if (!self::$enabled) return;
+
+        self::$cache[$key] = [
+            'data' => $data,
+            'expires' => time() + ($ttl ?? self::$ttl)
+        ];
+    }
+
+    public static function clear(): void {
+        self::$cache = [];
+    }
+
+    public static function disable(): void {
+        self::$enabled = false;
+    }
+
+    public static function enable(): void {
+        self::$enabled = true;
+    }
+
+    public static function generateKey(string $sql, array $params): string {
+        return md5($sql . serialize($params));
+    }
 }
 
 /**
- * Execute a query and return single row
+ * Execute a query and return results (alias for db_fetch_all)
+ */
+function db_query(string $sql, array $params = []): array {
+    return db_fetch_all($sql, $params);
+}
+
+/**
+ * Execute a query and return all results with caching
+ */
+function db_fetch_all(string $sql, array $params = []): array {
+    // Check cache for SELECT queries
+    $isSelect = stripos(trim($sql), 'SELECT') === 0;
+
+    if ($isSelect) {
+        $cacheKey = QueryCache::generateKey($sql, $params);
+        $cached = QueryCache::get($cacheKey);
+
+        if ($cached !== null) {
+            return $cached;
+        }
+    }
+
+    $stmt = db()->prepare($sql);
+    $stmt->execute($params);
+    $result = $stmt->fetchAll();
+
+    // Cache SELECT results
+    if ($isSelect) {
+        QueryCache::set($cacheKey, $result);
+    }
+
+    return $result;
+}
+
+/**
+ * Execute a query and return single row with caching
  */
 function db_fetch(string $sql, array $params = []): ?array {
+    // Check cache for SELECT queries
+    $isSelect = stripos(trim($sql), 'SELECT') === 0;
+
+    if ($isSelect) {
+        $cacheKey = QueryCache::generateKey($sql, $params);
+        $cached = QueryCache::get($cacheKey);
+
+        if ($cached !== null) {
+            return $cached;
+        }
+    }
+
     $stmt = db()->prepare($sql);
     $stmt->execute($params);
     $result = $stmt->fetch();
-    return $result ?: null;
+    $result = $result ?: null;
+
+    // Cache SELECT results
+    if ($isSelect && $result !== null) {
+        QueryCache::set($cacheKey, $result);
+    }
+
+    return $result;
 }
 
 /**
- * Execute a query and return first column of first row
+ * Execute a query and return first column of first row with caching
  */
 function db_value(string $sql, array $params = []) {
+    // Check cache for SELECT queries
+    $isSelect = stripos(trim($sql), 'SELECT') === 0;
+
+    if ($isSelect) {
+        $cacheKey = QueryCache::generateKey($sql, $params);
+        $cached = QueryCache::get($cacheKey);
+
+        if ($cached !== null) {
+            return $cached;
+        }
+    }
+
     $stmt = db()->prepare($sql);
     $stmt->execute($params);
-    return $stmt->fetchColumn();
+    $result = $stmt->fetchColumn();
+
+    // Cache SELECT results
+    if ($isSelect) {
+        QueryCache::set($cacheKey, $result);
+    }
+
+    return $result;
+}
+
+/**
+ * Execute a non-query statement (INSERT, UPDATE, DELETE) and return affected rows
+ */
+function db_execute(string $sql, array $params = []): int {
+    // Clear cache on data modifications
+    QueryCache::clear();
+
+    $stmt = db()->prepare($sql);
+    $stmt->execute($params);
+    return $stmt->rowCount();
 }
 
 /**

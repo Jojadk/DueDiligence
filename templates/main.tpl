@@ -223,6 +223,7 @@
     <script src="/assets/js/searchable-select.js"></script>
     <script src="/assets/js/components.js"></script>
     <script src="/assets/js/offline-sync.js"></script>
+    <script src="/js/collaboration.js"></script>
     <script src="/assets/js/main.js"></script>
     <script src="/assets/js/app.js"></script>
 
