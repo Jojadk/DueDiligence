@@ -295,6 +295,122 @@ Response: JSON
 
 ---
 
+### 3.10. Image/Gallery Module
+**Fil:** `modules/image/api.php` ⭐ NYT
+
+**Actions (9 total):**
+- `upload` - Upload enkelt billede
+- `get_list` - Liste billeder med pagination (50/side)
+- `get_image` - Enkelt billede detaljer
+- `update` - Opdater metadata (description, tags)
+- `delete` - Slet billede
+- `reorder` - **Drag-and-drop sortering**
+- `set_primary` - Sæt primært billede
+- `bulk_upload` - Upload flere billeder
+- `get_gallery` - Hent formateret galleri
+
+**Features:**
+- Understøtter JPEG, PNG, GIF, WebP (max 10MB)
+- Drag-and-drop billede sortering
+- Primær billede prioritering
+- Pagination for store gallerier
+- Metadata tracking (uploader, dato, størrelse)
+
+**Optimering:**
+- Pagination reducerer queries
+- Indexed display_order for hurtig sortering
+
+---
+
+### 3.11. Price Catalog Module
+**Fil:** `modules/price_catalog/api.php` ⭐ NYT
+
+**Actions (15 total):**
+
+**Kategorier:**
+- `get_categories` - Liste kategorier
+- `create_category` - Opret kategori
+- `update_category` - Opdater kategori
+- `delete_category` - Slet kategori
+- `reorder_categories` - **Drag-and-drop kategori sortering**
+
+**Items:**
+- `get_items` - Liste katalog items med pagination
+- `search_items` - Søg i katalog
+- `get_item` - Enkelt item detaljer
+- `create_item` - Opret item
+- `update_item` - Opdater item
+- `delete_item` - Slet item
+- `reorder_items` - **Drag-and-drop item sortering**
+
+**Utilities:**
+- `get_price_history` - Pris historik for item
+- `import_catalog` - Import fra CSV
+- `export_catalog` - Export til CSV
+
+**Features:**
+- Hierarkisk kategori struktur
+- Pris historik tracking
+- CSV import/export
+- Søgning med relevans sortering
+- Drag-and-drop organisering
+
+---
+
+### 3.12. Template Module
+**Fil:** `modules/template/api.php` ⭐ NYT
+
+**Actions (12 total):**
+
+**Templates:**
+- `get_templates` - Liste templates (filter på budget type)
+- `get_template` - Enkelt template med items
+- `create_template` - Opret template
+- `update_template` - Opdater template
+- `delete_template` - Slet template
+- `duplicate_template` - Kopier template
+
+**Items:**
+- `add_item` - Tilføj linje til template
+- `update_item` - Opdater template linje
+- `delete_item` - Slet template linje
+- `reorder_items` - **Drag-and-drop linje sortering**
+
+**Utilities:**
+- `apply_template` - Anvend template til element
+- `get_categories` - Hent template kategorier
+
+**Features:**
+- Support for CAPEX, OPEX, Reinstatement
+- Template duplication
+- Apply template til element (bulk create budget lines)
+- Kategori organisering
+- Drag-and-drop linje sortering
+
+---
+
+### 3.13. Menu Module
+**Fil:** `modules/menu/api.php` ⭐ NYT
+
+**Actions (7 total):**
+- `get_menu` - Fuld menu struktur
+- `get_user_menu` - Menu filtreret på bruger rettigheder
+- `create_item` - Opret menu punkt
+- `update_item` - Opdater menu punkt
+- `delete_item` - Slet menu punkt
+- `reorder` - **Drag-and-drop menu sortering**
+- `move_item` - **Flyt menu punkt til ny parent**
+
+**Features:**
+- Hierarkisk menu struktur
+- Permission-baseret filtrering
+- Drag-and-drop sortering og move
+- Aktiv/inaktiv status
+- Icon og URL support
+- Circular reference prevention
+
+---
+
 ### 4. Database Optimering - Recursive CTE
 
 **Fil:** `migrations/add_recursive_cte_optimizations.sql` ⭐ NYT
@@ -366,8 +482,14 @@ Response: JSON
 | Element | ✅ | 9 | ✅ Yes | modules/element/api.php |
 | Report | ✅ | 7 | ⚠️ Partial | modules/report/api.php |
 | User | ✅ | 16 | N/A | modules/user/api.php |
+| Image | ✅ | 9 | ✅ Yes | modules/image/api.php |
+| Price Catalog | ✅ | 15 | ✅ Yes | modules/price_catalog/api.php |
+| Template | ✅ | 12 | ✅ Yes | modules/template/api.php |
+| Menu | ✅ | 7 | ✅ Yes | modules/menu/api.php |
 
-**Total:** 9 moduler, 70 actions
+**Total:** 13 moduler, 113 actions
+
+**Drag-and-Drop:** 6 moduler med 10 drag-and-drop endpoints
 
 ---
 
@@ -413,6 +535,7 @@ project_permissions
 1. ✅ `create_database_views_and_optimization.sql` - Views og indexes
 2. ✅ `create_dynamic_permissions_system_v2.sql` - Permission system
 3. ✅ `add_recursive_cte_optimizations.sql` - Recursive CTE funktioner
+4. ✅ `add_module_support_tables.sql` - Støtte tabeller for nye moduler (Image, Price Catalog, Template, Menu)
 
 ---
 
