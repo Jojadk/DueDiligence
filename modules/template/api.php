@@ -3,19 +3,24 @@
  * Template Module API
  *
  * Handles budget templates for CAPEX, OPEX, and Reinstatement
+ * Supports hierarchical structure with groups/folders
  *
  * Actions:
  * - get_templates: Get all templates
  * - get_template: Get single template with items
+ * - get_hierarchy: Get template with hierarchical structure
  * - create_template: Create new template
  * - update_template: Update template
  * - delete_template: Delete template
  * - duplicate_template: Duplicate existing template
  *
  * - add_item: Add item to template
+ * - create_group: Create group/folder item
  * - update_item: Update template item
+ * - update_multiplier: Update multiplier for group
  * - delete_item: Delete template item
  * - reorder_items: Reorder template items (drag-and-drop)
+ * - move_item: Move item to new parent
  *
  * - apply_template: Apply template to element
  * - get_categories: Get template categories
@@ -658,4 +663,263 @@ function handle_get_categories(array $user): array {
         'success' => true,
         'categories' => array_values($categories)
     ];
+}
+
+/**
+ * Get template with hierarchical structure
+ * GET ?module=template&action=get_hierarchy&id=X
+ */
+function handle_get_hierarchy(array $user): array {
+    $templateId = sanitize_int($_GET['id'] ?? 0);
+
+    if (!$templateId) {
+        return ['success' => false, 'error' => 'Template ID mangler'];
+    }
+
+    $template = db_fetch("
+        SELECT * FROM budget_templates WHERE id = :id
+    ", ['id' => $templateId]);
+
+    if (!$template) {
+        return ['success' => false, 'error' => 'Template ikke fundet'];
+    }
+
+    // Get hierarchical structure using database function
+    $hierarchy = db_fetch_all("
+        SELECT * FROM get_template_hierarchy(:template_id)
+    ", ['template_id' => $templateId]);
+
+    return [
+        'success' => true,
+        'template' => $template,
+        'hierarchy' => $hierarchy
+    ];
+}
+
+/**
+ * Create group/folder item
+ * POST ?module=template&action=create_group
+ */
+function handle_create_group(array $user): array {
+    csrf_require();
+
+    $templateId = sanitize_int($_POST['template_id'] ?? 0);
+    $description = sanitize_string($_POST['description'] ?? '');
+    $parentId = isset($_POST['parent_id']) ? sanitize_int($_POST['parent_id']) : null;
+    $quantity = sanitize_float($_POST['quantity'] ?? 1);
+
+    if (!$templateId || !$description) {
+        return ['success' => false, 'error' => 'Template ID og beskrivelse er påkrævet'];
+    }
+
+    db_begin_transaction();
+    try {
+        // Get next display order
+        $maxOrder = db_value("
+            SELECT COALESCE(MAX(display_order), 0)
+            FROM budget_template_items
+            WHERE template_id = :template_id AND parent_id " . ($parentId ? "= :parent_id" : "IS NULL"),
+            $parentId ? ['template_id' => $templateId, 'parent_id' => $parentId] : ['template_id' => $templateId]
+        );
+
+        $itemData = [
+            'template_id' => $templateId,
+            'parent_id' => $parentId,
+            'description' => $description,
+            'is_group' => true,
+            'quantity' => $quantity,
+            'unit' => 'stk',
+            'price_per_unit' => 0,
+            'multiplier' => 1,
+            'display_order' => $maxOrder + 1
+        ];
+
+        $itemId = db_insert('budget_template_items', $itemData);
+
+        // Update template timestamp
+        db_update('budget_templates',
+            ['updated_at' => date('Y-m-d H:i:s')],
+            'id = :id',
+            ['id' => $templateId]
+        );
+
+        db_commit();
+
+        log_activity('template_group_created', 'template', $templateId);
+
+        return [
+            'success' => true,
+            'item_id' => $itemId,
+            'message' => 'Gruppe oprettet'
+        ];
+
+    } catch (Exception $e) {
+        db_rollback();
+        return ['success' => false, 'error' => 'Kunne ikke oprette gruppe'];
+    }
+}
+
+/**
+ * Update multiplier for group (updates all children)
+ * POST ?module=template&action=update_multiplier
+ */
+function handle_update_multiplier(array $user): array {
+    csrf_require();
+
+    $itemId = sanitize_int($_POST['id'] ?? 0);
+    $newQuantity = sanitize_float($_POST['quantity'] ?? 1);
+
+    if (!$itemId) {
+        return ['success' => false, 'error' => 'Element ID mangler'];
+    }
+
+    // Get item
+    $item = db_fetch("
+        SELECT * FROM budget_template_items WHERE id = :id
+    ", ['id' => $itemId]);
+
+    if (!$item) {
+        return ['success' => false, 'error' => 'Element ikke fundet'];
+    }
+
+    if (!$item['is_group']) {
+        return ['success' => false, 'error' => 'Kun grupper kan have multiplier'];
+    }
+
+    db_begin_transaction();
+    try {
+        $oldQuantity = (float)$item['quantity'];
+        $multiplierChange = $oldQuantity > 0 ? ($newQuantity / $oldQuantity) : 1;
+
+        // Update group quantity
+        db_update('budget_template_items',
+            ['quantity' => $newQuantity],
+            'id = :id',
+            ['id' => $itemId]
+        );
+
+        // Update all children multipliers
+        db_execute("
+            UPDATE budget_template_items
+            SET multiplier = multiplier * :multiplier_change
+            WHERE parent_id = :parent_id
+        ", [
+            'multiplier_change' => $multiplierChange,
+            'parent_id' => $itemId
+        ]);
+
+        // Update template timestamp
+        db_update('budget_templates',
+            ['updated_at' => date('Y-m-d H:i:s')],
+            'id = :id',
+            ['id' => $item['template_id']]
+        );
+
+        db_commit();
+
+        log_activity('template_multiplier_updated', 'template_item', $itemId);
+
+        return [
+            'success' => true,
+            'message' => 'Multiplier opdateret',
+            'multiplier_change' => $multiplierChange
+        ];
+
+    } catch (Exception $e) {
+        db_rollback();
+        return ['success' => false, 'error' => 'Kunne ikke opdatere multiplier'];
+    }
+}
+
+/**
+ * Move item to new parent
+ * POST ?module=template&action=move_item
+ */
+function handle_move_item(array $user): array {
+    csrf_require();
+
+    $itemId = sanitize_int($_POST['id'] ?? 0);
+    $newParentId = isset($_POST['new_parent_id']) ? sanitize_int($_POST['new_parent_id']) : null;
+
+    if (!$itemId) {
+        return ['success' => false, 'error' => 'Element ID mangler'];
+    }
+
+    // Get item
+    $item = db_fetch("SELECT * FROM budget_template_items WHERE id = :id", ['id' => $itemId]);
+
+    if (!$item) {
+        return ['success' => false, 'error' => 'Element ikke fundet'];
+    }
+
+    // Prevent moving to self
+    if ($newParentId === $itemId) {
+        return ['success' => false, 'error' => 'Element kan ikke flyttes til sig selv'];
+    }
+
+    // Check for circular reference
+    if ($newParentId !== null && is_template_item_descendant($newParentId, $itemId)) {
+        return ['success' => false, 'error' => 'Element kan ikke flyttes til et af sine underordnede'];
+    }
+
+    db_begin_transaction();
+    try {
+        // Get next display order in new location
+        $maxOrder = db_value("
+            SELECT COALESCE(MAX(display_order), 0)
+            FROM budget_template_items
+            WHERE template_id = :template_id AND parent_id " . ($newParentId ? "= :parent_id" : "IS NULL"),
+            $newParentId ?
+                ['template_id' => $item['template_id'], 'parent_id' => $newParentId] :
+                ['template_id' => $item['template_id']]
+        );
+
+        db_update('budget_template_items',
+            [
+                'parent_id' => $newParentId,
+                'display_order' => $maxOrder + 1
+            ],
+            'id = :id',
+            ['id' => $itemId]
+        );
+
+        // Update template timestamp
+        db_update('budget_templates',
+            ['updated_at' => date('Y-m-d H:i:s')],
+            'id = :id',
+            ['id' => $item['template_id']]
+        );
+
+        db_commit();
+
+        log_activity('template_item_moved', 'template_item', $itemId);
+
+        return [
+            'success' => true,
+            'message' => 'Element flyttet'
+        ];
+
+    } catch (Exception $e) {
+        db_rollback();
+        return ['success' => false, 'error' => 'Kunne ikke flytte element'];
+    }
+}
+
+/**
+ * Helper: Check if item is descendant of another
+ */
+function is_template_item_descendant(int $itemId, int $ancestorId): bool {
+    $parent = db_fetch("
+        SELECT parent_id FROM budget_template_items WHERE id = :id
+    ", ['id' => $itemId]);
+
+    if (!$parent || !$parent['parent_id']) {
+        return false;
+    }
+
+    if ($parent['parent_id'] == $ancestorId) {
+        return true;
+    }
+
+    return is_template_item_descendant($parent['parent_id'], $ancestorId);
 }

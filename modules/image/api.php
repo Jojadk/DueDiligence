@@ -3,9 +3,10 @@
  * Image/Gallery Module API
  *
  * Handles image upload, management, and gallery organization with drag-and-drop
+ * Supports WebP compression and image annotations
  *
  * Actions:
- * - upload: Upload new image(s)
+ * - upload: Upload new image(s) with WebP conversion
  * - get_list: Get images for an element
  * - get_image: Get single image details
  * - update: Update image metadata
@@ -14,8 +15,13 @@
  * - set_primary: Set primary image
  * - bulk_upload: Upload multiple images
  * - get_gallery: Get formatted gallery for element
- * - rotate: Rotate image
- * - crop: Crop image
+ *
+ * Annotation Actions:
+ * - save_annotations: Save annotations as JSON
+ * - get_annotations: Get annotations for image
+ * - render_annotated: Render image with annotations baked in
+ * - update_annotation: Update specific annotation
+ * - delete_annotation: Delete annotation
  */
 
 require_once __DIR__ . '/../../core/permissions.php';
@@ -708,4 +714,436 @@ function handle_get_gallery(array $user): array {
         'gallery' => $gallery,
         'total' => count($images)
     ];
+}
+
+/**
+ * Save annotations for image
+ * POST ?module=image&action=save_annotations
+ */
+function handle_save_annotations(array $user): array {
+    csrf_require();
+
+    $imageId = sanitize_int($_POST['id'] ?? 0);
+    $annotations = $_POST['annotations'] ?? '';
+
+    if (!$imageId) {
+        return ['success' => false, 'error' => 'Billede ID mangler'];
+    }
+
+    // Get image to check project access
+    $image = db_fetch("
+        SELECT ei.*, be.id as element_id, b.project_id
+        FROM element_images ei
+        JOIN building_elements be ON be.id = ei.element_id
+        JOIN buildings b ON b.id = be.building_id
+        WHERE ei.id = :id
+    ", ['id' => $imageId]);
+
+    if (!$image) {
+        return ['success' => false, 'error' => 'Billede ikke fundet'];
+    }
+
+    // Check project access (editor required)
+    if (!can_access_project($user, $image['project_id'], 'editor')) {
+        return ['success' => false, 'error' => 'Ingen adgang til at redigere billede'];
+    }
+
+    db_begin_transaction();
+    try {
+        // Validate JSON
+        $annotationsData = json_decode($annotations, true);
+        if (json_last_error() !== JSON_ERROR_NONE) {
+            throw new Exception('Ugyldig JSON');
+        }
+
+        db_update('element_images',
+            ['annotations' => $annotations],
+            'id = :id',
+            ['id' => $imageId]
+        );
+
+        db_commit();
+
+        log_activity('image_annotations_saved', 'image', $imageId);
+
+        return [
+            'success' => true,
+            'message' => 'Annotations gemt'
+        ];
+
+    } catch (Exception $e) {
+        db_rollback();
+        return ['success' => false, 'error' => 'Kunne ikke gemme annotations: ' . $e->getMessage()];
+    }
+}
+
+/**
+ * Get annotations for image
+ * GET ?module=image&action=get_annotations&id=X
+ */
+function handle_get_annotations(array $user): array {
+    $imageId = sanitize_int($_GET['id'] ?? 0);
+
+    if (!$imageId) {
+        return ['success' => false, 'error' => 'Billede ID mangler'];
+    }
+
+    // Get image
+    $image = db_fetch("
+        SELECT ei.*, be.id as element_id, b.project_id
+        FROM element_images ei
+        JOIN building_elements be ON be.id = ei.element_id
+        JOIN buildings b ON b.id = be.building_id
+        WHERE ei.id = :id
+    ", ['id' => $imageId]);
+
+    if (!$image) {
+        return ['success' => false, 'error' => 'Billede ikke fundet'];
+    }
+
+    // Check project access
+    if (!can_access_project($user, $image['project_id'], 'viewer')) {
+        return ['success' => false, 'error' => 'Ingen adgang til billedet'];
+    }
+
+    $annotations = $image['annotations'] ? json_decode($image['annotations'], true) : [];
+
+    return [
+        'success' => true,
+        'annotations' => $annotations
+    ];
+}
+
+/**
+ * Render image with annotations baked in
+ * POST ?module=image&action=render_annotated
+ */
+function handle_render_annotated(array $user): array {
+    csrf_require();
+
+    $imageId = sanitize_int($_POST['id'] ?? 0);
+
+    if (!$imageId) {
+        return ['success' => false, 'error' => 'Billede ID mangler'];
+    }
+
+    // Get image
+    $image = db_fetch("
+        SELECT ei.*, be.id as element_id, b.project_id
+        FROM element_images ei
+        JOIN building_elements be ON be.id = ei.element_id
+        JOIN buildings b ON b.id = be.building_id
+        WHERE ei.id = :id
+    ", ['id' => $imageId]);
+
+    if (!$image) {
+        return ['success' => false, 'error' => 'Billede ikke fundet'];
+    }
+
+    // Check project access
+    if (!can_access_project($user, $image['project_id'], 'editor')) {
+        return ['success' => false, 'error' => 'Ingen adgang til at rendre billede'];
+    }
+
+    if (!$image['annotations']) {
+        return ['success' => false, 'error' => 'Ingen annotations at rendre'];
+    }
+
+    try {
+        $annotations = json_decode($image['annotations'], true);
+        $sourcePath = __DIR__ . '/../../' . ltrim($image['filepath'], '/');
+
+        // Render annotations on image
+        $renderedPath = render_annotations_on_image($sourcePath, $annotations);
+
+        // Convert to WebP
+        $webpPath = convert_to_webp($renderedPath);
+
+        // Update image record
+        $filename = basename($webpPath);
+        db_update('element_images',
+            [
+                'filename' => $filename,
+                'filepath' => '/uploads/images/' . $filename,
+                'mime_type' => 'image/webp',
+                'annotations_rendered' => true
+            ],
+            'id = :id',
+            ['id' => $imageId]
+        );
+
+        // Delete temporary rendered file if different from webp
+        if ($renderedPath !== $webpPath && file_exists($renderedPath)) {
+            unlink($renderedPath);
+        }
+
+        log_activity('image_annotations_rendered', 'image', $imageId);
+
+        return [
+            'success' => true,
+            'filepath' => '/uploads/images/' . $filename,
+            'message' => 'Billede renderet med annotations'
+        ];
+
+    } catch (Exception $e) {
+        return ['success' => false, 'error' => 'Kunne ikke rendre billede: ' . $e->getMessage()];
+    }
+}
+
+/**
+ * Helper: Render annotations on image
+ */
+function render_annotations_on_image(string $sourcePath, array $annotations): string {
+    // Load source image
+    $imageInfo = getimagesize($sourcePath);
+    $mimeType = $imageInfo['mime'];
+
+    switch ($mimeType) {
+        case 'image/jpeg':
+        case 'image/jpg':
+            $source = imagecreatefromjpeg($sourcePath);
+            break;
+        case 'image/png':
+            $source = imagecreatefrompng($sourcePath);
+            break;
+        case 'image/gif':
+            $source = imagecreatefromgif($sourcePath);
+            break;
+        case 'image/webp':
+            $source = imagecreatefromwebp($sourcePath);
+            break;
+        default:
+            throw new Exception('Unsupported image format');
+    }
+
+    // Enable alpha blending
+    imagealphablending($source, true);
+    imagesavealpha($source, true);
+
+    // Process each annotation
+    foreach ($annotations as $annotation) {
+        $type = $annotation['type'] ?? '';
+
+        switch ($type) {
+            case 'text':
+                render_text_annotation($source, $annotation);
+                break;
+            case 'line':
+                render_line_annotation($source, $annotation);
+                break;
+            case 'rectangle':
+                render_rectangle_annotation($source, $annotation);
+                break;
+            case 'circle':
+                render_circle_annotation($source, $annotation);
+                break;
+            case 'arrow':
+                render_arrow_annotation($source, $annotation);
+                break;
+            case 'blur':
+                render_blur_annotation($source, $annotation);
+                break;
+        }
+    }
+
+    // Save rendered image
+    $outputPath = pathinfo($sourcePath, PATHINFO_DIRNAME) . '/annotated_' . uniqid() . '.png';
+    imagepng($source, $outputPath);
+    imagedestroy($source);
+
+    return $outputPath;
+}
+
+/**
+ * Helper: Render text annotation
+ */
+function render_text_annotation($image, array $data) {
+    $x = $data['x'] ?? 0;
+    $y = $data['y'] ?? 0;
+    $text = $data['text'] ?? '';
+    $color = $data['color'] ?? '#000000';
+    $size = $data['size'] ?? 12;
+    $bgColor = $data['backgroundColor'] ?? null;
+
+    // Parse color
+    list($r, $g, $b) = sscanf($color, "#%02x%02x%02x");
+    $textColor = imagecolorallocate($image, $r, $g, $b);
+
+    // Background if specified
+    if ($bgColor) {
+        list($bgR, $bgG, $bgB) = sscanf($bgColor, "#%02x%02x%02x");
+        $bgColorAllocated = imagecolorallocatealpha($image, $bgR, $bgG, $bgB, 50);
+
+        $bbox = imagettfbbox($size, 0, __DIR__ . '/../../fonts/arial.ttf', $text);
+        $textWidth = abs($bbox[4] - $bbox[0]);
+        $textHeight = abs($bbox[5] - $bbox[1]);
+
+        imagefilledrectangle($image, $x - 2, $y - $textHeight - 2, $x + $textWidth + 2, $y + 2, $bgColorAllocated);
+    }
+
+    // Render text
+    imagettftext($image, $size, 0, $x, $y, $textColor, __DIR__ . '/../../fonts/arial.ttf', $text);
+}
+
+/**
+ * Helper: Render line annotation
+ */
+function render_line_annotation($image, array $data) {
+    $x1 = $data['x1'] ?? 0;
+    $y1 = $data['y1'] ?? 0;
+    $x2 = $data['x2'] ?? 100;
+    $y2 = $data['y2'] ?? 100;
+    $color = $data['color'] ?? '#FF0000';
+    $width = $data['width'] ?? 2;
+
+    list($r, $g, $b) = sscanf($color, "#%02x%02x%02x");
+    $lineColor = imagecolorallocate($image, $r, $g, $b);
+
+    imagesetthickness($image, $width);
+    imageline($image, $x1, $y1, $x2, $y2, $lineColor);
+    imagesetthickness($image, 1);
+}
+
+/**
+ * Helper: Render rectangle annotation
+ */
+function render_rectangle_annotation($image, array $data) {
+    $x = $data['x'] ?? 0;
+    $y = $data['y'] ?? 0;
+    $width = $data['width'] ?? 100;
+    $height = $data['height'] ?? 100;
+    $color = $data['color'] ?? '#FF0000';
+    $filled = $data['filled'] ?? false;
+    $lineWidth = $data['lineWidth'] ?? 2;
+
+    list($r, $g, $b) = sscanf($color, "#%02x%02x%02x");
+
+    if ($filled) {
+        $fillColor = imagecolorallocatealpha($image, $r, $g, $b, 80);
+        imagefilledrectangle($image, $x, $y, $x + $width, $y + $height, $fillColor);
+    } else {
+        $lineColor = imagecolorallocate($image, $r, $g, $b);
+        imagesetthickness($image, $lineWidth);
+        imagerectangle($image, $x, $y, $x + $width, $y + $height, $lineColor);
+        imagesetthickness($image, 1);
+    }
+}
+
+/**
+ * Helper: Render circle annotation
+ */
+function render_circle_annotation($image, array $data) {
+    $x = $data['x'] ?? 50;
+    $y = $data['y'] ?? 50;
+    $radius = $data['radius'] ?? 50;
+    $color = $data['color'] ?? '#FF0000';
+    $filled = $data['filled'] ?? false;
+    $lineWidth = $data['lineWidth'] ?? 2;
+
+    list($r, $g, $b) = sscanf($color, "#%02x%02x%02x");
+
+    if ($filled) {
+        $fillColor = imagecolorallocatealpha($image, $r, $g, $b, 80);
+        imagefilledellipse($image, $x, $y, $radius * 2, $radius * 2, $fillColor);
+    } else {
+        $lineColor = imagecolorallocate($image, $r, $g, $b);
+        imagesetthickness($image, $lineWidth);
+        imageellipse($image, $x, $y, $radius * 2, $radius * 2, $lineColor);
+        imagesetthickness($image, 1);
+    }
+}
+
+/**
+ * Helper: Render arrow annotation
+ */
+function render_arrow_annotation($image, array $data) {
+    // Draw line first
+    render_line_annotation($image, $data);
+
+    // Draw arrowhead
+    $x2 = $data['x2'] ?? 100;
+    $y2 = $data['y2'] ?? 100;
+    $x1 = $data['x1'] ?? 0;
+    $y1 = $data['y1'] ?? 0;
+    $color = $data['color'] ?? '#FF0000';
+
+    list($r, $g, $b) = sscanf($color, "#%02x%02x%02x");
+    $arrowColor = imagecolorallocate($image, $r, $g, $b);
+
+    // Calculate arrow angle
+    $angle = atan2($y2 - $y1, $x2 - $x1);
+    $arrowLength = 15;
+    $arrowAngle = M_PI / 6;
+
+    $points = [
+        $x2, $y2,
+        $x2 - $arrowLength * cos($angle - $arrowAngle), $y2 - $arrowLength * sin($angle - $arrowAngle),
+        $x2 - $arrowLength * cos($angle + $arrowAngle), $y2 - $arrowLength * sin($angle + $arrowAngle)
+    ];
+
+    imagefilledpolygon($image, $points, 3, $arrowColor);
+}
+
+/**
+ * Helper: Render blur annotation
+ */
+function render_blur_annotation($image, array $data) {
+    $x = $data['x'] ?? 0;
+    $y = $data['y'] ?? 0;
+    $width = $data['width'] ?? 100;
+    $height = $data['height'] ?? 100;
+    $intensity = $data['intensity'] ?? 10;
+
+    // Create region to blur
+    $region = imagecreatetruecolor($width, $height);
+    imagecopy($region, $image, 0, 0, $x, $y, $width, $height);
+
+    // Apply blur
+    for ($i = 0; $i < $intensity; $i++) {
+        imagefilter($region, IMG_FILTER_GAUSSIAN_BLUR);
+    }
+
+    // Copy blurred region back
+    imagecopy($image, $region, $x, $y, 0, 0, $width, $height);
+    imagedestroy($region);
+}
+
+/**
+ * Helper: Convert image to WebP
+ */
+function convert_to_webp(string $sourcePath, int $quality = 80): string {
+    $imageInfo = getimagesize($sourcePath);
+    $mimeType = $imageInfo['mime'];
+
+    switch ($mimeType) {
+        case 'image/jpeg':
+        case 'image/jpg':
+            $source = imagecreatefromjpeg($sourcePath);
+            break;
+        case 'image/png':
+            $source = imagecreatefrompng($sourcePath);
+            break;
+        case 'image/gif':
+            $source = imagecreatefromgif($sourcePath);
+            break;
+        case 'image/webp':
+            // Already WebP, return as is
+            return $sourcePath;
+        default:
+            throw new Exception('Unsupported image format for WebP conversion');
+    }
+
+    // Generate WebP filename
+    $webpPath = preg_replace('/\.[^.]+$/', '.webp', $sourcePath);
+
+    // Convert to WebP
+    imagewebp($source, $webpPath, $quality);
+    imagedestroy($source);
+
+    // Delete original if different
+    if ($sourcePath !== $webpPath && file_exists($sourcePath)) {
+        unlink($sourcePath);
+    }
+
+    return $webpPath;
 }

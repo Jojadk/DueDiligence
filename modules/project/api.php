@@ -12,6 +12,7 @@
  * - delete: Delete project
  * - copy: Copy project
  * - get_tree: Get hierarchical project tree
+ * - reorder: Reorder projects (drag-and-drop)
  */
 
 /**
@@ -67,7 +68,7 @@ function handle_get_list(array $user): array {
     // Fetch projects with stats from view
     $projects = db_fetch_all("
         SELECT
-            p.id, p.name, p.description, p.status, p.created_at,
+            p.id, p.name, p.description, p.status, p.created_at, p.display_order,
             c.name as customer_name,
             ps.building_count, ps.element_count, ps.total_capex,
             ps.critical_count, ps.high_count
@@ -75,7 +76,7 @@ function handle_get_list(array $user): array {
         LEFT JOIN customers c ON p.customer_id = c.id
         LEFT JOIN v_project_summary ps ON p.id = ps.project_id
         $whereClause
-        ORDER BY p.created_at DESC
+        ORDER BY COALESCE(p.display_order, 999999) ASC, p.created_at DESC
         LIMIT :limit OFFSET :offset
     ", array_merge($params, ['limit' => $limit, 'offset' => $offset]));
 
@@ -406,6 +407,56 @@ function handle_get_tree(array $user): array {
             'total_capex' => $projectTotal
         ]
     ];
+}
+
+/**
+ * Reorder projects (drag-and-drop)
+ * POST /api.php?module=project&action=reorder
+ */
+function handle_reorder(array $user): array {
+    csrf_require();
+
+    $projectIds = $_POST['project_ids'] ?? [];
+
+    if (!is_array($projectIds) || empty($projectIds)) {
+        return ['success' => false, 'error' => 'Projekt ID liste er påkrævet'];
+    }
+
+    db_begin_transaction();
+    try {
+        $updated = 0;
+
+        foreach ($projectIds as $order => $projectId) {
+            $projectId = sanitize_int($projectId);
+
+            // Check if user has access to this project
+            if (!can_access_project($user, $projectId, 'viewer')) {
+                continue; // Skip projects user doesn't have access to
+            }
+
+            db_update('projects',
+                ['display_order' => $order + 1],
+                'id = :id',
+                ['id' => $projectId]
+            );
+
+            $updated++;
+        }
+
+        db_commit();
+
+        log_activity('projects_reordered', 'system', 0);
+
+        return [
+            'success' => true,
+            'updated' => $updated,
+            'message' => "$updated projekter opdateret"
+        ];
+
+    } catch (Exception $e) {
+        db_rollback();
+        return ['success' => false, 'error' => 'Kunne ikke opdatere rækkefølge'];
+    }
 }
 
 /**
