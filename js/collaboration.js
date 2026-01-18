@@ -224,14 +224,31 @@ class CollaborationManager {
 
     enableLocking(fields, options = {}) {
         const elements = this.getElements(fields);
+        if (!elements || elements.length === 0) {
+            console.warn('[Collab] No elements found for locking');
+            return;
+        }
 
         elements.forEach(element => {
+            if (!element || !element.dataset) {
+                console.warn('[Collab] Invalid element skipped:', element);
+                return;
+            }
+
             const fieldName = options.fieldName || element.name || element.dataset.field;
-            if (!fieldName) return;
+            if (!fieldName) {
+                console.warn('[Collab] Element missing field name:', element);
+                return;
+            }
 
             element.dataset.recordType = this.recordType;
             element.dataset.recordId = options.recordId || this.recordId || element.dataset.recordId;
             element.dataset.fieldName = fieldName;
+
+            // Ensure unique element ID
+            if (!element.id) {
+                element.id = `field_${this.recordType}_${element.dataset.recordId}_${fieldName}_${Date.now()}`;
+            }
 
             element.addEventListener('focus', (e) => this.handleFocus(e.target));
             element.addEventListener('blur', (e) => this.handleBlur(e.target));
@@ -250,6 +267,11 @@ class CollaborationManager {
     }
 
     async handleFocus(element) {
+        if (!element || !element.dataset) {
+            console.warn('[Collab] Invalid element in handleFocus');
+            return;
+        }
+
         const lockKey = this.getLockKey(element);
         if (this.activeLocks.has(lockKey)) {
             this.resetInactivityTimer(lockKey);
@@ -257,7 +279,7 @@ class CollaborationManager {
         }
 
         const result = await this.acquireLock(element);
-        if (result.success) {
+        if (result && result.success) {
             this.activeLocks.set(lockKey, {
                 element,
                 recordType: element.dataset.recordType,
@@ -273,16 +295,17 @@ class CollaborationManager {
                 this.onLockAcquired(element, result);
             }
         } else {
-            this.markAsLocked(element, 'other', result);
-            element.blur();
+            this.markAsLocked(element, 'other', result || {});
+            if (element.blur) element.blur();
             element.disabled = true;
 
             if (this.onLockDenied) {
                 this.onLockDenied(element, result);
             }
 
+            const userName = (result && result.locked_by_user_name) || 'en anden bruger';
             this.showNotification('warning',
-                `Feltet redigeres af ${result.locked_by_user_name}. Venter på at det bliver frigivet...`);
+                `Feltet redigeres af ${userName}. Venter på at det bliver frigivet...`);
         }
     }
 
@@ -313,6 +336,10 @@ class CollaborationManager {
     }
 
     getLockKey(element) {
+        if (!element || !element.dataset) {
+            console.warn('[Collab] Invalid element for lock key');
+            return null;
+        }
         return `${element.dataset.recordType}:${element.dataset.recordId}:${element.dataset.fieldName}`;
     }
 
@@ -338,7 +365,17 @@ class CollaborationManager {
     }
 
     markAsLocked(element, lockType, lockInfo = {}) {
+        if (!element || !element.classList) {
+            console.warn('[Collab] Invalid element in markAsLocked');
+            return;
+        }
+
         element.classList.add('is-locked', `locked-by-${lockType}`);
+
+        if (!element.parentElement) {
+            console.warn('[Collab] Element has no parent for lock indicator');
+            return;
+        }
 
         if (!element.parentElement.querySelector('.lock-indicator')) {
             const indicator = document.createElement('span');
@@ -351,8 +388,15 @@ class CollaborationManager {
     }
 
     markAsUnlocked(element) {
+        if (!element || !element.classList) {
+            console.warn('[Collab] Invalid element in markAsUnlocked');
+            return;
+        }
+
         element.classList.remove('is-locked', 'locked-by-self', 'locked-by-other');
         element.disabled = false;
+
+        if (!element.parentElement) return;
 
         const indicator = element.parentElement.querySelector('.lock-indicator');
         if (indicator) indicator.remove();
@@ -698,7 +742,15 @@ class BudgetCollaboration extends CollaborationManager {
 
     updateTotalDisplay(hierarchy) {
         const totalElement = document.getElementById('budget-total');
-        if (!totalElement) return;
+        if (!totalElement) {
+            console.warn('[Budget] Total element not found');
+            return;
+        }
+
+        if (!hierarchy || typeof hierarchy.total === 'undefined') {
+            console.warn('[Budget] Invalid hierarchy data');
+            return;
+        }
 
         const total = hierarchy.total || 0;
         const formattedTotal = new Intl.NumberFormat('da-DK', {
@@ -707,17 +759,35 @@ class BudgetCollaboration extends CollaborationManager {
             minimumFractionDigits: 0
         }).format(total);
 
-        totalElement.classList.add('updating');
+        if (totalElement.classList) {
+            totalElement.classList.add('updating');
+        }
+
         setTimeout(() => {
-            totalElement.textContent = formattedTotal;
-            totalElement.classList.remove('updating');
+            if (totalElement) {
+                totalElement.textContent = formattedTotal;
+                if (totalElement.classList) {
+                    totalElement.classList.remove('updating');
+                }
+            }
         }, 200);
     }
 
     updateItemRow(row, itemData) {
+        if (!row || !itemData) {
+            console.warn('[Budget] Invalid row or item data');
+            return;
+        }
+
         const cells = row.querySelectorAll('td');
+        if (!cells || cells.length === 0) {
+            console.warn('[Budget] No cells found in row');
+            return;
+        }
 
         cells.forEach(cell => {
+            if (!cell || !cell.dataset) return;
+
             const field = cell.dataset.field;
             if (!field) return;
 
@@ -731,8 +801,14 @@ class BudgetCollaboration extends CollaborationManager {
                     cell.textContent = this.formatValue(field, itemData[field]);
                 }
 
-                cell.classList.add('live-updated');
-                setTimeout(() => cell.classList.remove('live-updated'), 1000);
+                if (cell.classList) {
+                    cell.classList.add('live-updated');
+                    setTimeout(() => {
+                        if (cell && cell.classList) {
+                            cell.classList.remove('live-updated');
+                        }
+                    }, 1000);
+                }
             }
         });
     }

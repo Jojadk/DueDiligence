@@ -7,6 +7,11 @@ const Toast = {
      * Show a toast notification
      */
     show(message, options = {}) {
+        if (!message) {
+            console.warn('[Toast] No message provided');
+            return null;
+        }
+
         const {
             type = 'info', // success, error, warning, info
             duration = 4000,
@@ -17,7 +22,7 @@ const Toast = {
 
         const container = document.getElementById('toastContainer');
         if (!container) {
-            console.error('Toast container not found');
+            console.error('[Toast] Toast container not found');
             return null;
         }
 
@@ -72,10 +77,12 @@ const Toast = {
         // Dismiss button handler
         if (dismissible) {
             const dismissBtn = toast.querySelector('.toast-close');
-            dismissBtn.onclick = () => {
-                if (dismissTimeout) clearTimeout(dismissTimeout);
-                this.dismiss(toast);
-            };
+            if (dismissBtn) {
+                dismissBtn.onclick = () => {
+                    if (dismissTimeout) clearTimeout(dismissTimeout);
+                    this.dismiss(toast);
+                };
+            }
         }
 
         return toast;
@@ -85,11 +92,14 @@ const Toast = {
      * Dismiss a toast
      */
     dismiss(toast) {
-        if (!toast) return;
+        if (!toast || !toast.classList) {
+            console.warn('[Toast] Invalid toast element');
+            return;
+        }
 
         toast.classList.remove('show');
         setTimeout(() => {
-            if (toast.parentNode) {
+            if (toast && toast.parentNode) {
                 toast.parentNode.removeChild(toast);
             }
         }, 300);

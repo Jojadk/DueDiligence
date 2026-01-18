@@ -9,6 +9,11 @@ const Modal = {
      * Open a modal
      */
     open(content, options = {}) {
+        if (!content) {
+            console.warn('[Modal] No content provided');
+            return null;
+        }
+
         const {
             size = 'medium', // small, medium, large
             title = '',
@@ -38,7 +43,7 @@ const Modal = {
         const contentEl = document.getElementById(contentId);
 
         if (!modalEl || !contentEl) {
-            console.error('Modal element not found');
+            console.error('[Modal] Modal element not found:', modalId);
             return null;
         }
 
@@ -72,6 +77,11 @@ const Modal = {
         modalEl.classList.add('active');
         document.body.classList.add('modal-open');
 
+        // Dispatch modalOpen event for collaboration system
+        if (typeof ModalManager !== 'undefined' && ModalManager.open) {
+            ModalManager.open();
+        }
+
         // Show backdrop
         if (backdrop) {
             const backdropEl = document.getElementById('backdrop');
@@ -94,9 +104,13 @@ const Modal = {
 
         // Add close button handlers
         const closeButtons = contentEl.querySelectorAll('[data-modal-close]');
-        closeButtons.forEach(btn => {
-            btn.onclick = () => this.close(modalId);
-        });
+        if (closeButtons && closeButtons.length > 0) {
+            closeButtons.forEach(btn => {
+                if (btn) {
+                    btn.onclick = () => this.close(modalId);
+                }
+            });
+        }
 
         // Store modal info
         this.activeModals.push({
@@ -133,6 +147,11 @@ const Modal = {
 
         // Remove from active modals
         this.activeModals = this.activeModals.filter(m => m.id !== modalId);
+
+        // Dispatch modalClose event for collaboration system
+        if (typeof ModalManager !== 'undefined' && ModalManager.close) {
+            ModalManager.close();
+        }
 
         // Hide backdrop if no more modals
         if (this.activeModals.length === 0) {
@@ -201,18 +220,28 @@ const Modal = {
 
             // Add button handlers
             const contentEl = document.getElementById('smallModalContent');
+            if (!contentEl) {
+                console.error('[Modal] Content element not found for confirm dialog');
+                resolve(false);
+                return;
+            }
+
             const confirmBtn = contentEl.querySelector('[data-action="confirm"]');
             const cancelBtn = contentEl.querySelector('[data-action="cancel"]');
 
-            confirmBtn.onclick = () => {
-                this.close(modalId);
-                resolve(true);
-            };
+            if (confirmBtn) {
+                confirmBtn.onclick = () => {
+                    this.close(modalId);
+                    resolve(true);
+                };
+            }
 
-            cancelBtn.onclick = () => {
-                this.close(modalId);
-                resolve(false);
-            };
+            if (cancelBtn) {
+                cancelBtn.onclick = () => {
+                    this.close(modalId);
+                    resolve(false);
+                };
+            }
         });
     },
 
