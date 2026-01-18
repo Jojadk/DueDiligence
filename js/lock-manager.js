@@ -20,7 +20,9 @@ class LockManager {
     constructor(options = {}) {
         this.clientId = this.generateClientId();
         this.activeLocks = new Map(); // Map of field selector -> lock info
-        this.heartbeatInterval = options.heartbeatInterval || 30000; // 30 seconds
+        this.heartbeatInterval = options.heartbeatInterval || 30000; // 30 seconds active
+        this.heartbeatIntervalInactive = options.heartbeatIntervalInactive || 60000; // 60 seconds inactive
+        this.currentHeartbeatInterval = this.heartbeatInterval;
         this.heartbeatTimer = null;
         this.pollInterval = options.pollInterval || 3000; // 3 seconds for live updates
         this.pollTimer = null;
@@ -33,6 +35,119 @@ class LockManager {
         this.onLockReleased = options.onLockReleased || null;
         this.onLockDenied = options.onLockDenied || null;
         this.onChanges = options.onChanges || null;
+        this.isWindowActive = true;
+        this.isModalOpen = false;
+
+        // Setup visibility change listeners
+        this.setupVisibilityListeners();
+    }
+
+    /**
+     * Setup Page Visibility API listeners
+     */
+    setupVisibilityListeners() {
+        // Page visibility change
+        document.addEventListener('visibilitychange', () => {
+            if (document.hidden) {
+                this.onWindowInactive();
+            } else {
+                this.onWindowActive();
+            }
+        });
+
+        // Window focus/blur (fallback for older browsers)
+        window.addEventListener('focus', () => this.onWindowActive());
+        window.addEventListener('blur', () => this.onWindowInactive());
+
+        // Modal detection
+        document.addEventListener('modalOpen', () => this.onModalOpen());
+        document.addEventListener('modalClose', () => this.onModalClose());
+    }
+
+    /**
+     * Handle window becoming inactive
+     */
+    onWindowInactive() {
+        if (!this.isWindowActive) return;
+
+        this.isWindowActive = false;
+        console.log('Window inactive - reducing heartbeat frequency');
+
+        this.adjustHeartbeatInterval();
+    }
+
+    /**
+     * Handle window becoming active
+     */
+    onWindowActive() {
+        if (this.isWindowActive) return;
+
+        this.isWindowActive = true;
+        console.log('Window active - restoring heartbeat frequency');
+
+        // Send heartbeat immediately when window becomes active
+        if (this.activeLocks.size > 0) {
+            this.sendHeartbeat();
+        }
+
+        this.adjustHeartbeatInterval();
+    }
+
+    /**
+     * Handle modal opening
+     */
+    onModalOpen() {
+        this.isModalOpen = true;
+        console.log('Modal opened - reducing heartbeat frequency');
+
+        this.adjustHeartbeatInterval();
+    }
+
+    /**
+     * Handle modal closing
+     */
+    onModalClose() {
+        this.isModalOpen = false;
+        console.log('Modal closed - restoring heartbeat frequency');
+
+        // Send heartbeat immediately when modal closes
+        if (this.activeLocks.size > 0) {
+            this.sendHeartbeat();
+        }
+
+        this.adjustHeartbeatInterval();
+    }
+
+    /**
+     * Adjust heartbeat interval based on window/modal state
+     */
+    adjustHeartbeatInterval() {
+        const newInterval = this.getActiveHeartbeatInterval();
+
+        if (newInterval !== this.currentHeartbeatInterval) {
+            this.currentHeartbeatInterval = newInterval;
+
+            // Restart timer with new interval
+            if (this.heartbeatTimer) {
+                clearInterval(this.heartbeatTimer);
+                this.heartbeatTimer = setInterval(() => {
+                    if (this.activeLocks.size > 0) {
+                        this.sendHeartbeat();
+                    }
+                }, this.currentHeartbeatInterval);
+            }
+        }
+    }
+
+    /**
+     * Get appropriate heartbeat interval based on current state
+     */
+    getActiveHeartbeatInterval() {
+        // Use slow interval if window is inactive OR modal is open
+        if (!this.isWindowActive || this.isModalOpen) {
+            return this.heartbeatIntervalInactive;
+        }
+        return this.heartbeatInterval;
     }
 
     /**
@@ -323,11 +438,14 @@ class LockManager {
             return;
         }
 
+        // Use current interval based on window state
+        this.currentHeartbeatInterval = this.getActiveHeartbeatInterval();
+
         this.heartbeatTimer = setInterval(() => {
             if (this.activeLocks.size > 0) {
                 this.sendHeartbeat();
             }
-        }, this.heartbeatInterval);
+        }, this.currentHeartbeatInterval);
     }
 
     /**

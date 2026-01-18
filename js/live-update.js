@@ -22,13 +22,130 @@ class LiveUpdateManager {
     constructor(options = {}) {
         this.recordType = options.recordType;
         this.recordId = options.recordId;
-        this.pollInterval = options.pollInterval || 3000; // 3 seconds
+        this.pollInterval = options.pollInterval || 3000; // 3 seconds active
+        this.pollIntervalInactive = options.pollIntervalInactive || 30000; // 30 seconds inactive
+        this.currentPollInterval = this.pollInterval;
         this.pollTimer = null;
         this.lastPollTimestamp = null;
         this.onUpdate = options.onUpdate || null;
         this.apiBase = options.apiBase || '/api.php';
         this.isActive = false;
+        this.isWindowActive = true;
+        this.isModalOpen = false;
         this.changeQueue = [];
+
+        // Setup visibility change listeners
+        this.setupVisibilityListeners();
+    }
+
+    /**
+     * Setup Page Visibility API listeners
+     */
+    setupVisibilityListeners() {
+        // Page visibility change
+        document.addEventListener('visibilitychange', () => {
+            if (document.hidden) {
+                this.onWindowInactive();
+            } else {
+                this.onWindowActive();
+            }
+        });
+
+        // Window focus/blur (fallback for older browsers)
+        window.addEventListener('focus', () => this.onWindowActive());
+        window.addEventListener('blur', () => this.onWindowInactive());
+
+        // Modal detection (listen for modal events)
+        document.addEventListener('modalOpen', () => this.onModalOpen());
+        document.addEventListener('modalClose', () => this.onModalClose());
+    }
+
+    /**
+     * Handle window becoming inactive
+     */
+    onWindowInactive() {
+        if (!this.isWindowActive) return;
+
+        this.isWindowActive = false;
+        console.log('Window inactive - reducing poll frequency');
+
+        if (this.isActive) {
+            this.adjustPollInterval();
+        }
+    }
+
+    /**
+     * Handle window becoming active
+     */
+    onWindowActive() {
+        if (this.isWindowActive) return;
+
+        this.isWindowActive = true;
+        console.log('Window active - restoring poll frequency');
+
+        if (this.isActive) {
+            // Poll immediately on activation
+            this.poll();
+            // Adjust interval back to normal
+            this.adjustPollInterval();
+        }
+    }
+
+    /**
+     * Handle modal opening
+     */
+    onModalOpen() {
+        this.isModalOpen = true;
+        console.log('Modal opened - reducing poll frequency');
+
+        if (this.isActive) {
+            this.adjustPollInterval();
+        }
+    }
+
+    /**
+     * Handle modal closing
+     */
+    onModalClose() {
+        this.isModalOpen = false;
+        console.log('Modal closed - restoring poll frequency');
+
+        if (this.isActive) {
+            // Poll immediately when modal closes
+            this.poll();
+            // Adjust interval back
+            this.adjustPollInterval();
+        }
+    }
+
+    /**
+     * Adjust polling interval based on window/modal state
+     */
+    adjustPollInterval() {
+        const newInterval = this.getActiveInterval();
+
+        if (newInterval !== this.currentPollInterval) {
+            this.currentPollInterval = newInterval;
+
+            // Restart timer with new interval
+            if (this.pollTimer) {
+                clearInterval(this.pollTimer);
+                this.pollTimer = setInterval(() => {
+                    this.poll();
+                }, this.currentPollInterval);
+            }
+        }
+    }
+
+    /**
+     * Get appropriate interval based on current state
+     */
+    getActiveInterval() {
+        // Use slow interval if window is inactive OR modal is open
+        if (!this.isWindowActive || this.isModalOpen) {
+            return this.pollIntervalInactive;
+        }
+        return this.pollInterval;
     }
 
     /**
@@ -42,10 +159,13 @@ class LiveUpdateManager {
         this.isActive = true;
         this.lastPollTimestamp = new Date().toISOString();
 
+        // Use current interval based on window state
+        this.currentPollInterval = this.getActiveInterval();
+
         // Start polling
         this.pollTimer = setInterval(() => {
             this.poll();
-        }, this.pollInterval);
+        }, this.currentPollInterval);
 
         // Initial poll
         this.poll();
