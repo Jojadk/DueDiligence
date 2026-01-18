@@ -84,11 +84,23 @@ function handle_get_variables(array $user): array {
             ]
         ],
         'formatting' => [
-            'label' => 'Formatering',
+            'label' => 'Formatering (Pipe Filters)',
             'examples' => [
-                '{{format_number(project.total_capex)}}' => 'Formatér tal (1.000.000)',
-                '{{format_date(project.created_at)}}' => 'Formatér dato (01-01-2024)',
-                '{{format_currency(element.capex)}}' => 'Formatér valuta (kr. 1.000.000)'
+                '{{project.total_capex | number}}' => 'Formatér tal (1.000.000)',
+                '{{project.created_at | date}}' => 'Formatér dato (01-01-2024)',
+                '{{element.capex | currency}}' => 'Formatér valuta (kr. 1.000.000)',
+                '{{project.name | uppercase}}' => 'Store bogstaver (PROJEKT)',
+                '{{project.name | lowercase}}' => 'Små bogstaver (projekt)',
+                '{{project.name | capitalize}}' => 'Stort forbogstav (Projekt)',
+                '{{project.description | truncate:100}}' => 'Afkort til 100 tegn'
+            ]
+        ],
+        'red_flags_display' => [
+            'label' => 'Røde Flag Visning',
+            'description' => 'Vis alle 5 flag typer med highlighting af valgte',
+            'examples' => [
+                '{{red_flags_display(element)}}' => 'Vis flag badges for element',
+                '{{for element in elements}}{{red_flags_display(element)}}{{endfor}}' => 'Flag for alle elementer'
             ]
         ]
     ];
@@ -390,28 +402,29 @@ function get_report_data(int $projectId): array {
  * Helper: Render template with variables
  */
 function render_template(string $template, array $data): string {
-    // Replace simple variables
     $rendered = $template;
 
-    // Project variables
-    foreach ($data['project'] as $key => $value) {
-        $rendered = str_replace("{{project.$key}}", htmlspecialchars((string)$value), $rendered);
-    }
-
-    // Handle loops - buildings
+    // Handle loops first (so filters work inside loops)
     $rendered = handle_loop($rendered, 'buildings', $data['buildings']);
-
-    // Handle loops - elements
     $rendered = handle_loop($rendered, 'elements', $data['elements']);
-
-    // Handle loops - red_flags
     $rendered = handle_loop($rendered, 'red_flags', $data['red_flags']);
 
     // Handle conditionals
     $rendered = handle_conditionals($rendered, $data);
 
-    // Handle formatting functions
-    $rendered = handle_formatting($rendered);
+    // Handle red_flags_display function
+    $rendered = handle_red_flags_display($rendered);
+
+    // Handle pipe filters BEFORE replacing simple variables
+    $rendered = handle_pipe_filters($rendered, $data);
+
+    // Replace simple variables (without filters)
+    foreach ($data['project'] as $key => $value) {
+        $rendered = str_replace("{{project.$key}}", htmlspecialchars((string)$value), $rendered);
+    }
+
+    // Legacy formatting functions (keep for backwards compatibility)
+    $rendered = handle_legacy_formatting($rendered);
 
     return $rendered;
 }
@@ -423,20 +436,89 @@ function handle_loop(string $template, string $loopName, array $items): string {
     $pattern = '/\{\{for\s+(\w+)\s+in\s+' . preg_quote($loopName) . '\}\}(.*?)\{\{endfor\}\}/s';
 
     return preg_replace_callback($pattern, function($matches) use ($items) {
-        $itemVar = $matches[1];
+        $itemVar = $matches[1]; // e.g., "building" (singular)
         $loopTemplate = $matches[2];
         $output = '';
 
         foreach ($items as $item) {
             $itemOutput = $loopTemplate;
+
+            // Handle pipe filters inside loop
+            $itemOutput = handle_loop_pipe_filters($itemOutput, $itemVar, $item);
+
+            // Handle red_flags_display inside loop
+            $itemOutput = str_replace("{{REDFLAG_DISPLAY:$itemVar}}", generate_red_flags_display($item), $itemOutput);
+
+            // Replace simple variables
             foreach ($item as $key => $value) {
                 $itemOutput = str_replace("{{{$itemVar}.$key}}", htmlspecialchars((string)$value), $itemOutput);
             }
+
             $output .= $itemOutput;
         }
 
         return $output;
     }, $template);
+}
+
+/**
+ * Helper: Handle pipe filters inside loops
+ */
+function handle_loop_pipe_filters(string $template, string $itemVar, array $item): string {
+    // Match {{itemVar.field | filter}} or {{itemVar.field | filter:param}}
+    $pattern = '/\{\{' . preg_quote($itemVar) . '\.([a-z_]+)\s*\|\s*([a-z_]+)(?::(\d+))?\}\}/i';
+
+    return preg_replace_callback($pattern, function($matches) use ($item) {
+        $field = $matches[1];    // e.g., "name"
+        $filter = $matches[2];   // e.g., "uppercase"
+        $param = $matches[3] ?? null;
+
+        $value = $item[$field] ?? '';
+        return apply_filter($value, $filter, $param);
+    }, $template);
+}
+
+/**
+ * Helper: Generate red flags display HTML
+ */
+function generate_red_flags_display(array $item): string {
+    // Define all 5 flag types
+    $allFlags = [
+        1 => ['label' => 'Kritisk', 'color' => '#DC2626', 'icon' => '🚩'],
+        2 => ['label' => 'Alvorlig', 'color' => '#F97316', 'icon' => '⚠️'],
+        3 => ['label' => 'Moderat', 'color' => '#FBBF24', 'icon' => '⚡'],
+        4 => ['label' => 'Mindre', 'color' => '#10B981', 'icon' => 'ℹ️'],
+        5 => ['label' => 'Info', 'color' => '#3B82F6', 'icon' => '💡']
+    ];
+
+    // Get element's red flag score (1-5)
+    $score = (int)($item['red_flag_score'] ?? 0);
+
+    $html = '<span class="red-flags-display" style="display: inline-flex; gap: 4px;">';
+
+    foreach ($allFlags as $flagValue => $flag) {
+        $isActive = ($flagValue == $score);
+        $opacity = $isActive ? '1' : '0.2';
+        $border = $isActive ? '2px solid ' . $flag['color'] : '1px solid #e5e7eb';
+
+        $html .= sprintf(
+            '<span class="flag-badge" style="display: inline-flex; align-items: center; gap: 2px; padding: 2px 6px; border: %s; border-radius: 4px; opacity: %s; background: %s; font-size: 12px;">
+                <span>%s</span>
+                <span style="color: %s; font-weight: %s;">%s</span>
+            </span>',
+            $border,
+            $opacity,
+            $isActive ? $flag['color'] . '20' : '#f9fafb',
+            $flag['icon'],
+            $flag['color'],
+            $isActive ? 'bold' : 'normal',
+            $flag['label']
+        );
+    }
+
+    $html .= '</span>';
+
+    return $html;
 }
 
 /**
@@ -494,9 +576,79 @@ function evaluate_condition(string $condition, array $data): bool {
 }
 
 /**
- * Helper: Handle formatting functions
+ * Helper: Handle pipe filters ({{variable | filter}})
  */
-function handle_formatting(string $template): string {
+function handle_pipe_filters(string $template, array $data): string {
+    // Match {{variable | filter}} or {{variable | filter:param}}
+    $pattern = '/\{\{([a-z_]+\.[a-z_]+)\s*\|\s*([a-z_]+)(?::(\d+))?\}\}/i';
+
+    return preg_replace_callback($pattern, function($matches) use ($data) {
+        $variable = $matches[1]; // e.g., "project.name"
+        $filter = $matches[2];   // e.g., "uppercase"
+        $param = $matches[3] ?? null; // e.g., "100" for truncate:100
+
+        // Get variable value
+        $parts = explode('.', $variable);
+        $value = $data[$parts[0]][$parts[1]] ?? '';
+
+        // Apply filter
+        return apply_filter($value, $filter, $param);
+    }, $template);
+}
+
+/**
+ * Helper: Apply filter to value
+ */
+function apply_filter($value, string $filter, $param = null): string {
+    switch ($filter) {
+        case 'number':
+            return number_format((float)$value, 0, ',', '.');
+
+        case 'currency':
+            return 'kr. ' . number_format((float)$value, 0, ',', '.');
+
+        case 'date':
+            $date = strtotime($value);
+            return $date ? date('d-m-Y', $date) : $value;
+
+        case 'uppercase':
+            return strtoupper($value);
+
+        case 'lowercase':
+            return strtolower($value);
+
+        case 'capitalize':
+            return ucfirst(strtolower($value));
+
+        case 'truncate':
+            $length = (int)$param ?: 100;
+            return strlen($value) > $length ? substr($value, 0, $length) . '...' : $value;
+
+        default:
+            return htmlspecialchars((string)$value);
+    }
+}
+
+/**
+ * Helper: Handle red_flags_display function
+ */
+function handle_red_flags_display(string $template): string {
+    // Match {{red_flags_display(element)}} or similar
+    $pattern = '/\{\{red_flags_display\((\w+)\)\}\}/';
+
+    return preg_replace_callback($pattern, function($matches) {
+        $varName = $matches[1]; // e.g., "element"
+
+        // Generate HTML for flag display
+        // This returns a placeholder that will be replaced in the loop with actual data
+        return "{{REDFLAG_DISPLAY:$varName}}";
+    }, $template);
+}
+
+/**
+ * Helper: Handle legacy formatting functions (backwards compatibility)
+ */
+function handle_legacy_formatting(string $template): string {
     // Format numbers: format_number(123456) -> 123.456
     $template = preg_replace_callback('/format_number\(([^)]+)\)/', function($matches) {
         $value = trim($matches[1]);

@@ -3,7 +3,7 @@
  * Image/Gallery Module API
  *
  * Handles image upload, management, and gallery organization with drag-and-drop
- * Supports WebP compression and image annotations
+ * Supports WebP compression and image annotations (overlay-based, non-destructive)
  *
  * Actions:
  * - upload: Upload new image(s) with WebP conversion
@@ -16,12 +16,21 @@
  * - bulk_upload: Upload multiple images
  * - get_gallery: Get formatted gallery for element
  *
- * Annotation Actions:
- * - save_annotations: Save annotations as JSON
+ * Annotation Actions (Non-destructive - preserves original image):
+ * - save_annotations: Save annotations as JSON (for frontend overlay rendering)
  * - get_annotations: Get annotations for image
- * - render_annotated: Render image with annotations baked in
- * - update_annotation: Update specific annotation
- * - delete_annotation: Delete annotation
+ * - get_annotation_tools: Get available annotation tools configuration
+ * - export_annotated: Export image with annotations baked in (optional, for reports)
+ *
+ * Supported Annotation Types:
+ * - text: Text with background
+ * - line: Simple line
+ * - rectangle: Rectangle (filled or outline)
+ * - circle: Circle (filled or outline)
+ * - arrow: Arrow line
+ * - blur: Blur region
+ * - flag: Flag marker (red, yellow, green, etc.)
+ * - measurement: Measurement tool with text label and line (e.g., "1 mtr")
  */
 
 require_once __DIR__ . '/../../core/permissions.php';
@@ -815,10 +824,130 @@ function handle_get_annotations(array $user): array {
 }
 
 /**
- * Render image with annotations baked in
- * POST ?module=image&action=render_annotated
+ * Get annotation tools configuration
+ * GET ?module=image&action=get_annotation_tools
  */
-function handle_render_annotated(array $user): array {
+function handle_get_annotation_tools(array $user): array {
+    $tools = [
+        [
+            'id' => 'text',
+            'name' => 'Tekst',
+            'icon' => 'text',
+            'settings' => [
+                'color' => ['type' => 'color', 'default' => '#000000', 'label' => 'Tekstfarve'],
+                'backgroundColor' => ['type' => 'color', 'default' => '#FFFF00', 'label' => 'Baggrundsfarve'],
+                'size' => ['type' => 'number', 'default' => 16, 'min' => 8, 'max' => 72, 'label' => 'Skriftstørrelse'],
+                'text' => ['type' => 'text', 'default' => '', 'label' => 'Tekst']
+            ]
+        ],
+        [
+            'id' => 'line',
+            'name' => 'Linje',
+            'icon' => 'line',
+            'settings' => [
+                'color' => ['type' => 'color', 'default' => '#FF0000', 'label' => 'Farve'],
+                'width' => ['type' => 'number', 'default' => 2, 'min' => 1, 'max' => 20, 'label' => 'Tykkelse']
+            ]
+        ],
+        [
+            'id' => 'arrow',
+            'name' => 'Pil',
+            'icon' => 'arrow',
+            'settings' => [
+                'color' => ['type' => 'color', 'default' => '#FF0000', 'label' => 'Farve'],
+                'width' => ['type' => 'number', 'default' => 2, 'min' => 1, 'max' => 20, 'label' => 'Tykkelse']
+            ]
+        ],
+        [
+            'id' => 'rectangle',
+            'name' => 'Firkant',
+            'icon' => 'rectangle',
+            'settings' => [
+                'color' => ['type' => 'color', 'default' => '#FF0000', 'label' => 'Farve'],
+                'filled' => ['type' => 'boolean', 'default' => false, 'label' => 'Udfyldt'],
+                'lineWidth' => ['type' => 'number', 'default' => 2, 'min' => 1, 'max' => 20, 'label' => 'Tykkelse']
+            ]
+        ],
+        [
+            'id' => 'circle',
+            'name' => 'Cirkel',
+            'icon' => 'circle',
+            'settings' => [
+                'color' => ['type' => 'color', 'default' => '#FF0000', 'label' => 'Farve'],
+                'filled' => ['type' => 'boolean', 'default' => false, 'label' => 'Udfyldt'],
+                'lineWidth' => ['type' => 'number', 'default' => 2, 'min' => 1, 'max' => 20, 'label' => 'Tykkelse']
+            ]
+        ],
+        [
+            'id' => 'blur',
+            'name' => 'Blur',
+            'icon' => 'blur',
+            'settings' => [
+                'intensity' => ['type' => 'number', 'default' => 10, 'min' => 1, 'max' => 50, 'label' => 'Intensitet']
+            ]
+        ],
+        [
+            'id' => 'flag',
+            'name' => 'Flag',
+            'icon' => 'flag',
+            'settings' => [
+                'flagType' => [
+                    'type' => 'select',
+                    'default' => 'red',
+                    'options' => [
+                        ['value' => 'red', 'label' => 'Rød (Kritisk)', 'color' => '#DC2626'],
+                        ['value' => 'yellow', 'label' => 'Gul (Alvorlig)', 'color' => '#FBBF24'],
+                        ['value' => 'orange', 'label' => 'Orange (Moderat)', 'color' => '#F97316'],
+                        ['value' => 'green', 'label' => 'Grøn (Mindre)', 'color' => '#10B981'],
+                        ['value' => 'blue', 'label' => 'Blå (Info)', 'color' => '#3B82F6']
+                    ],
+                    'label' => 'Flag type'
+                ],
+                'size' => ['type' => 'number', 'default' => 24, 'min' => 16, 'max' => 64, 'label' => 'Størrelse'],
+                'label' => ['type' => 'text', 'default' => '', 'label' => 'Etiket (valgfri)']
+            ]
+        ],
+        [
+            'id' => 'measurement',
+            'name' => 'Måleværktøj',
+            'icon' => 'ruler',
+            'settings' => [
+                'color' => ['type' => 'color', 'default' => '#2563EB', 'label' => 'Farve'],
+                'width' => ['type' => 'number', 'default' => 2, 'min' => 1, 'max' => 10, 'label' => 'Linjetykkelse'],
+                'text' => ['type' => 'text', 'default' => '1 mtr', 'label' => 'Måling'],
+                'textSize' => ['type' => 'number', 'default' => 14, 'min' => 8, 'max' => 32, 'label' => 'Tekststørrelse'],
+                'showEnds' => ['type' => 'boolean', 'default' => true, 'label' => 'Vis endepunkter (|—|)']
+            ]
+        ]
+    ];
+
+    return [
+        'success' => true,
+        'tools' => $tools,
+        'responsive' => [
+            'mobile' => [
+                'touch_optimized' => true,
+                'min_touch_size' => 44, // 44x44 pixels for touch targets
+                'gesture_support' => ['pan', 'pinch_zoom', 'tap', 'long_press']
+            ],
+            'tablet' => [
+                'stylus_support' => true,
+                'precision_mode' => true
+            ],
+            'desktop' => [
+                'keyboard_shortcuts' => true,
+                'mouse_precision' => true
+            ]
+        ]
+    ];
+}
+
+/**
+ * Export image with annotations baked in (for reports/export)
+ * POST ?module=image&action=export_annotated
+ * Note: This creates a NEW image file. Original image is preserved.
+ */
+function handle_export_annotated(array $user): array {
     csrf_require();
 
     $imageId = sanitize_int($_POST['id'] ?? 0);
@@ -859,34 +988,46 @@ function handle_render_annotated(array $user): array {
         // Convert to WebP
         $webpPath = convert_to_webp($renderedPath);
 
-        // Update image record
+        // Create NEW database entry for exported image (preserves original)
         $filename = basename($webpPath);
-        db_update('element_images',
-            [
-                'filename' => $filename,
-                'filepath' => '/uploads/images/' . $filename,
-                'mime_type' => 'image/webp',
-                'annotations_rendered' => true
-            ],
-            'id = :id',
-            ['id' => $imageId]
-        );
+        $filesize = filesize($webpPath);
+        $imageInfo = getimagesize($webpPath);
+
+        $exportedImageData = [
+            'element_id' => $image['element_id'],
+            'filename' => $filename,
+            'original_filename' => 'annotated_' . $image['original_filename'],
+            'filepath' => '/uploads/images/' . $filename,
+            'mime_type' => 'image/webp',
+            'file_size' => $filesize,
+            'width' => $imageInfo[0] ?? 0,
+            'height' => $imageInfo[1] ?? 0,
+            'description' => ($image['description'] ?? '') . ' (Med annotations)',
+            'is_primary' => false,
+            'display_order' => 9999,
+            'uploaded_by_user_id' => $user['id'],
+            'created_at' => date('Y-m-d H:i:s'),
+            'annotations_rendered' => true
+        ];
+
+        $exportedImageId = db_insert('element_images', $exportedImageData);
 
         // Delete temporary rendered file if different from webp
         if ($renderedPath !== $webpPath && file_exists($renderedPath)) {
             unlink($renderedPath);
         }
 
-        log_activity('image_annotations_rendered', 'image', $imageId);
+        log_activity('image_annotations_exported', 'image', $imageId);
 
         return [
             'success' => true,
+            'exported_image_id' => $exportedImageId,
             'filepath' => '/uploads/images/' . $filename,
-            'message' => 'Billede renderet med annotations'
+            'message' => 'Billede eksporteret med annotations (original bevaret)'
         ];
 
     } catch (Exception $e) {
-        return ['success' => false, 'error' => 'Kunne ikke rendre billede: ' . $e->getMessage()];
+        return ['success' => false, 'error' => 'Kunne ikke eksportere billede: ' . $e->getMessage()];
     }
 }
 
@@ -942,6 +1083,12 @@ function render_annotations_on_image(string $sourcePath, array $annotations): st
                 break;
             case 'blur':
                 render_blur_annotation($source, $annotation);
+                break;
+            case 'flag':
+                render_flag_annotation($source, $annotation);
+                break;
+            case 'measurement':
+                render_measurement_annotation($source, $annotation);
                 break;
         }
     }
@@ -1106,6 +1253,144 @@ function render_blur_annotation($image, array $data) {
     // Copy blurred region back
     imagecopy($image, $region, $x, $y, 0, 0, $width, $height);
     imagedestroy($region);
+}
+
+/**
+ * Helper: Render flag annotation
+ */
+function render_flag_annotation($image, array $data) {
+    $x = $data['x'] ?? 50;
+    $y = $data['y'] ?? 50;
+    $flagType = $data['flagType'] ?? 'red';
+    $size = $data['size'] ?? 24;
+    $label = $data['label'] ?? '';
+
+    // Map flag types to colors
+    $flagColors = [
+        'red' => '#DC2626',
+        'yellow' => '#FBBF24',
+        'orange' => '#F97316',
+        'green' => '#10B981',
+        'blue' => '#3B82F6'
+    ];
+
+    $colorHex = $flagColors[$flagType] ?? '#DC2626';
+    list($r, $g, $b) = sscanf($colorHex, "#%02x%02x%02x");
+    $flagColor = imagecolorallocate($image, $r, $g, $b);
+
+    // Draw flag shape (triangular flag on pole)
+    $poleHeight = $size * 1.5;
+    $flagWidth = $size;
+    $flagHeight = $size * 0.6;
+
+    // Draw pole (line)
+    imagesetthickness($image, 2);
+    imageline($image, $x, $y, $x, $y + $poleHeight, $flagColor);
+
+    // Draw flag (triangle)
+    $flagPoints = [
+        $x, $y,                          // Top of pole
+        $x + $flagWidth, $y + $flagHeight / 2,  // Right point
+        $x, $y + $flagHeight             // Bottom of flag
+    ];
+    imagefilledpolygon($image, $flagPoints, 3, $flagColor);
+
+    // Add dark border to flag
+    $borderColor = imagecolorallocate($image, 0, 0, 0);
+    imagesetthickness($image, 1);
+    imagepolygon($image, $flagPoints, 3, $borderColor);
+
+    // Reset thickness
+    imagesetthickness($image, 1);
+
+    // Draw label if specified
+    if ($label) {
+        $textSize = 10;
+        $textColor = imagecolorallocate($image, 0, 0, 0);
+        $bgColor = imagecolorallocatealpha($image, 255, 255, 255, 30);
+
+        // Background rectangle for text
+        $textX = $x + $flagWidth + 5;
+        $textY = $y + 15;
+        $textWidth = strlen($label) * $textSize * 0.6;
+        $textHeight = $textSize + 4;
+
+        imagefilledrectangle($image, $textX - 2, $textY - $textHeight, $textX + $textWidth, $textY + 2, $bgColor);
+        imagestring($image, 3, $textX, $textY - $textHeight + 2, $label, $textColor);
+    }
+}
+
+/**
+ * Helper: Render measurement annotation
+ */
+function render_measurement_annotation($image, array $data) {
+    $x1 = $data['x1'] ?? 0;
+    $y1 = $data['y1'] ?? 0;
+    $x2 = $data['x2'] ?? 100;
+    $y2 = $data['y2'] ?? 100;
+    $color = $data['color'] ?? '#2563EB';
+    $width = $data['width'] ?? 2;
+    $text = $data['text'] ?? '1 mtr';
+    $textSize = $data['textSize'] ?? 14;
+    $showEnds = $data['showEnds'] ?? true;
+
+    list($r, $g, $b) = sscanf($color, "#%02x%02x%02x");
+    $lineColor = imagecolorallocate($image, $r, $g, $b);
+    $textColor = imagecolorallocate($image, $r, $g, $b);
+    $bgColor = imagecolorallocatealpha($image, 255, 255, 255, 30);
+
+    // Draw main measurement line
+    imagesetthickness($image, $width);
+    imageline($image, $x1, $y1, $x2, $y2, $lineColor);
+
+    // Draw end markers if enabled (perpendicular lines at both ends)
+    if ($showEnds) {
+        $angle = atan2($y2 - $y1, $x2 - $x1);
+        $perpAngle = $angle + M_PI / 2;
+        $endLength = 10;
+
+        // Start end marker
+        $sx1 = $x1 + $endLength * cos($perpAngle);
+        $sy1 = $y1 + $endLength * sin($perpAngle);
+        $sx2 = $x1 - $endLength * cos($perpAngle);
+        $sy2 = $y1 - $endLength * sin($perpAngle);
+        imageline($image, $sx1, $sy1, $sx2, $sy2, $lineColor);
+
+        // End end marker
+        $ex1 = $x2 + $endLength * cos($perpAngle);
+        $ey1 = $y2 + $endLength * sin($perpAngle);
+        $ex2 = $x2 - $endLength * cos($perpAngle);
+        $ey2 = $y2 - $endLength * sin($perpAngle);
+        imageline($image, $ex1, $ey1, $ex2, $ey2, $lineColor);
+    }
+
+    imagesetthickness($image, 1);
+
+    // Draw text above the line (centered)
+    $midX = ($x1 + $x2) / 2;
+    $midY = ($y1 + $y2) / 2;
+
+    // Calculate text position above line
+    $angle = atan2($y2 - $y1, $x2 - $x1);
+    $perpAngle = $angle - M_PI / 2;
+    $textOffset = 15;
+    $textX = $midX + $textOffset * cos($perpAngle);
+    $textY = $midY + $textOffset * sin($perpAngle);
+
+    // Draw text background
+    $textWidth = strlen($text) * $textSize * 0.6;
+    $textHeight = $textSize + 4;
+    imagefilledrectangle(
+        $image,
+        $textX - $textWidth / 2 - 2,
+        $textY - $textHeight - 2,
+        $textX + $textWidth / 2 + 2,
+        $textY + 2,
+        $bgColor
+    );
+
+    // Draw text (centered)
+    imagestring($image, 3, $textX - strlen($text) * 3, $textY - $textHeight + 2, $text, $textColor);
 }
 
 /**
