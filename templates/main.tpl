@@ -221,6 +221,7 @@
     <script src="/assets/js/router.js"></script>
     <script src="/assets/js/modal.js"></script>
     <script src="/js/notification-system.js"></script>
+    <script src="/js/base-module.js"></script>
     <script src="/js/app-features.js"></script>
     <script src="/assets/js/searchable-select.js"></script>
     <script src="/assets/js/components.js"></script>
