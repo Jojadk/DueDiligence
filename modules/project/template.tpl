@@ -79,143 +79,209 @@ $statusClass = ['planning'=>'badge-warning','active'=>'badge-success','on_hold'=
 <?php endif; ?>
 
 <script>
-const ProjectModule = {
-    search: '<?= esc_js($searchTerm) ?>',
-    page: <?= $page ?>,
-    customerSelect: null,
+// Brug BaseModule for at reducere dubleret kode
+const ProjectModule = Object.assign(
+    new BaseModule('project', {
+        titleSingular: 'Projekt',
+        titlePlural: 'Projekter',
+        instanceName: 'ProjectModule',
+        modalSize: 'large'
+    }),
+    {
+        search: '<?= esc_js($searchTerm) ?>',
+        page: <?= $page ?>,
+        customerSelect: null,
 
-    openCreate() {
-        Modal.open(this.getForm({}), {size: 'large', title: 'Nyt Projekt'});
-        setTimeout(() => this.initCustomerSelect(null, null), 100);
-    },
-
-    async openEdit(id) {
-        try {
-            App.showLoading();
-            const r = await API.get('/', {module: 'project', action: 'get', id});
-            App.hideLoading();
-            if (r.success) {
-                Modal.open(this.getForm(r.data, id), {size: 'large', title: 'Rediger Projekt'});
-                setTimeout(() => this.initCustomerSelect(r.data.customer_id, r.data.customer_label), 100);
-            }
-            else notify(r.error, {type: 'error'});
-        } catch(e) { App.hideLoading(); notify('Fejl ved hentning', {type: 'error'}); }
-    },
-
-    initCustomerSelect(value, label) {
-        const container = document.getElementById('customerSelectContainer');
-        if (container) {
-            this.customerSelect = new SearchableSelect({
-                container: container,
-                name: 'customer_id',
-                placeholder: 'Søg og vælg kunde...',
-                searchUrl: '/?module=project&action=search_customers',
-                required: true,
-                value: value,
-                label: label
+        // Override openCreate for at initialisere customerSelect
+        openCreate() {
+            Modal.open(this.getForm({}), {
+                size: this.config.modalSize,
+                title: `Opret ${this.config.titleSingular}`
             });
-        }
-    },
+            setTimeout(() => this.initCustomerSelect(null, null), 100);
+        },
 
-    getForm(d, id) {
-        return `<form onsubmit="return ProjectModule.submit(event, ${id||null});">
-        <input type="hidden" name="action" value="${id ? 'update' : 'create'}">
-        ${id ? `<input type="hidden" name="id" value="${id}">` : ''}
-        <div class="modal-body"><div id="formErrors"></div>
-        <div class="form-group"><label class="required">Projektnavn</label><input name="name" value="${escapeHtml(d.name||'')}" required class="form-control"></div>
-        <div class="form-group"><label class="required">Kunde</label><div id="customerSelectContainer"></div></div>
-        <div class="form-group"><label class="required">Adresse</label><input name="address" value="${escapeHtml(d.address||'')}" required class="form-control"></div>
-        <div class="form-row">
-            <div class="form-group"><label class="required">Postnr</label><input name="postal_code" value="${escapeHtml(d.postal_code||'')}" required class="form-control"></div>
-            <div class="form-group"><label class="required">By</label><input name="city" value="${escapeHtml(d.city||'')}" required class="form-control"></div>
-        </div>
-        <div class="form-row">
-            <div class="form-group"><label>BBR Nummer</label><input name="bbr_number" value="${escapeHtml(d.bbr_number||'')}" class="form-control"><small class="form-help">Bygnings- og Boligregistret</small></div>
-            <div class="form-group"><label>Besigtigelsesdato</label><input type="date" name="inspection_date" value="${escapeHtml(d.inspection_date||'')}" class="form-control"></div>
-        </div>
-        <div class="form-group"><label class="required">Status</label><select name="status" required class="form-control">
-            <option value="planning" ${(d.status||'planning')=='planning'?'selected':''}>Planlægning</option>
-            <option value="active" ${d.status=='active'?'selected':''}>Aktiv</option>
-            <option value="on_hold" ${d.status=='on_hold'?'selected':''}>På vent</option>
-            <option value="completed" ${d.status=='completed'?'selected':''}>Afsluttet</option>
-            <option value="archived" ${d.status=='archived'?'selected':''}>Arkiveret</option>
-        </select></div>
-        <div class="form-group"><label>Beskrivelse</label><textarea name="description" rows="4" class="form-control">${escapeHtml(d.description||'')}</textarea></div>
-        </div>
-        <div class="modal-footer">
-            <button type="button" class="btn btn-secondary" onclick="Modal.close(); ProjectModule.customerSelect?.destroy();">Annuller</button>
-            <button type="submit" class="btn btn-primary">${id ? 'Gem' : 'Opret'}</button>
-        </div></form>`;
-    },
-
-    async submit(e, id) {
-        e.preventDefault();
-        const fd = new FormData(e.target);
-        fd.append('module', 'project');
-        try {
-            const r = await API.post('/', fd, true);
-            if (r.success) { Modal.close(); this.customerSelect?.destroy(); notify(r.message || 'Gemt', {type: 'success'}); Router.reload(); }
-            else this.showErrors(r.errors || ['Fejl']);
-        } catch(e) { notify('Lagringsfejl', {type: 'error'}); }
-        return false;
-    },
-
-    showErrors(errs) {
-        const el = document.getElementById('formErrors');
-        if (el) { el.innerHTML = `<div class="alert alert-error">${errs.map(e => escapeHtml(e)).join('<br>')}</div>`; el.style.display = 'block'; }
-    },
-
-    async confirmDelete(id, name) {
-        if (await Modal.confirm(`Slet projekt "${name}"?`, {title: 'Bekræft', confirmText: 'Slet', confirmClass: 'btn-danger'})) {
-            const fd = new FormData();
-            fd.append('module', 'project');
-            fd.append('action', 'delete');
-            fd.append('id', id);
+        // Override openEdit for at initialisere customerSelect med data
+        async openEdit(id) {
             try {
-                const r = await API.post('/', fd, true);
-                if (r.success) { notify('Slettet', {type: 'success'}); Router.reload(); }
-                else notify(r.error, {type: 'error'});
-            } catch(e) { notify('Sletningsfejl', {type: 'error'}); }
-        }
-    },
+                App.showLoading();
+                const r = await API.get('/', {
+                    module: this.moduleName,
+                    action: 'get',
+                    id
+                });
+                App.hideLoading();
 
-    async copyProject(id, name) {
-        const newName = await Modal.prompt(`Kopier projekt "${name}"`, {
-            label: 'Nyt projektnavn:',
-            defaultValue: `${name} (kopi)`,
-            confirmText: 'Kopier',
-            confirmClass: 'btn-primary'
-        });
-
-        if (!newName) return;
-
-        App.showLoading('Kopierer projekt...');
-
-        try {
-            const fd = new FormData();
-            fd.append('action', 'copy_project');
-            fd.append('project_id', id);
-            fd.append('new_name', newName);
-
-            const r = await API.post('/api.php', fd, true);
-
-            App.hideLoading();
-
-            if (r.success) {
-                notify('Projekt kopieret', {type: 'success'});
-                Router.reload();
-            } else {
-                notify(r.error || 'Kunne ikke kopiere projekt');
+                if (r.success) {
+                    Modal.open(this.getForm(r.data, id), {
+                        size: this.config.modalSize,
+                        title: `Rediger ${this.config.titleSingular}`
+                    });
+                    setTimeout(() => this.initCustomerSelect(r.data.customer_id, r.data.customer_label), 100);
+                } else {
+                    notify(r.error, { type: 'error' });
+                }
+            } catch (e) {
+                App.hideLoading();
+                notify('Fejl ved hentning', { type: 'error' });
+                if (window.logError) window.logError(e);
             }
-        } catch(e) {
-            App.hideLoading();
-            notify('Netværksfejl ved kopiering', {type: 'success'});
-        }
-    },
+        },
 
-    search(e) { e.preventDefault(); navigate('project', {search: document.getElementById('searchInput').value}); return false; },
-    clearSearch() { navigate('project'); },
-    loadPage(p) { navigate('project', this.search ? {page: p, search: this.search} : {page: p}); }
-};
+        // Override submit for at rydde op i customerSelect
+        async submit(event, id = null) {
+            event.preventDefault();
+
+            const formData = new FormData(event.target);
+            formData.append('module', this.moduleName);
+            formData.append('action', id ? 'update' : 'create');
+            if (id) formData.append('id', id);
+
+            try {
+                const r = await API.post('/', formData, true);
+
+                if (r.success) {
+                    Modal.close();
+                    this.customerSelect?.destroy();
+                    notify(r.message || 'Gemt', { type: 'success' });
+                    Router.reload();
+                } else {
+                    this.showErrors(r.errors || ['Fejl ved lagring']);
+                }
+            } catch (e) {
+                notify('Lagringsfejl', { type: 'error' });
+                if (window.logError) window.logError(e);
+            }
+
+            return false;
+        },
+
+        // Initialiser SearchableSelect for kunde-valg
+        initCustomerSelect(value, label) {
+            const container = document.getElementById('customerSelectContainer');
+            if (container) {
+                this.customerSelect = new SearchableSelect({
+                    container: container,
+                    name: 'customer_id',
+                    placeholder: 'Søg og vælg kunde...',
+                    searchUrl: '/?module=project&action=search_customers',
+                    required: true,
+                    value: value,
+                    label: label
+                });
+            }
+        },
+
+        // Override getFormFields med projekt-specifikke felter
+        getFormFields(d, id) {
+            return `
+                <div class="form-group">
+                    <label class="required">Projektnavn</label>
+                    <input name="name" value="${escapeHtml(d.name||'')}" required class="form-control">
+                </div>
+                <div class="form-group">
+                    <label class="required">Kunde</label>
+                    <div id="customerSelectContainer"></div>
+                </div>
+                <div class="form-group">
+                    <label class="required">Adresse</label>
+                    <input name="address" value="${escapeHtml(d.address||'')}" required class="form-control">
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label class="required">Postnr</label>
+                        <input name="postal_code" value="${escapeHtml(d.postal_code||'')}" required class="form-control">
+                    </div>
+                    <div class="form-group">
+                        <label class="required">By</label>
+                        <input name="city" value="${escapeHtml(d.city||'')}" required class="form-control">
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>BBR Nummer</label>
+                        <input name="bbr_number" value="${escapeHtml(d.bbr_number||'')}" class="form-control">
+                        <small class="form-help">Bygnings- og Boligregistret</small>
+                    </div>
+                    <div class="form-group">
+                        <label>Besigtigelsesdato</label>
+                        <input type="date" name="inspection_date" value="${escapeHtml(d.inspection_date||'')}" class="form-control">
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label class="required">Status</label>
+                    <select name="status" required class="form-control">
+                        <option value="planning" ${(d.status||'planning')=='planning'?'selected':''}>Planlægning</option>
+                        <option value="active" ${d.status=='active'?'selected':''}>Aktiv</option>
+                        <option value="on_hold" ${d.status=='on_hold'?'selected':''}>På vent</option>
+                        <option value="completed" ${d.status=='completed'?'selected':''}>Afsluttet</option>
+                        <option value="archived" ${d.status=='archived'?'selected':''}>Arkiveret</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Beskrivelse</label>
+                    <textarea name="description" rows="4" class="form-control">${escapeHtml(d.description||'')}</textarea>
+                </div>
+            `;
+        },
+
+        // Custom getForm for at tilføje cleanup i annuller knap
+        getForm(data, id = null) {
+            return `
+                <form onsubmit="return ${this.config.instanceName}.submit(event, ${id || null});">
+                    <div class="modal-body">
+                        <div id="formErrors"></div>
+                        ${this.getFormFields(data, id)}
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" onclick="Modal.close(); ${this.config.instanceName}.customerSelect?.destroy();">Annuller</button>
+                        <button type="submit" class="btn btn-primary">${id ? 'Gem' : 'Opret'}</button>
+                    </div>
+                </form>
+            `;
+        },
+
+        // Projekt-specifik funktionalitet: kopier projekt
+        async copyProject(id, name) {
+            const newName = await Modal.prompt(`Kopier projekt "${name}"`, {
+                label: 'Nyt projektnavn:',
+                defaultValue: `${name} (kopi)`,
+                confirmText: 'Kopier',
+                confirmClass: 'btn-primary'
+            });
+
+            if (!newName) return;
+
+            App.showLoading('Kopierer projekt...');
+
+            try {
+                const fd = new FormData();
+                fd.append('action', 'copy_project');
+                fd.append('project_id', id);
+                fd.append('new_name', newName);
+
+                const r = await API.post('/api.php', fd, true);
+
+                App.hideLoading();
+
+                if (r.success) {
+                    notify('Projekt kopieret', {type: 'success'});
+                    Router.reload();
+                } else {
+                    notify(r.error || 'Kunne ikke kopiere projekt', {type: 'error'});
+                }
+            } catch(e) {
+                App.hideLoading();
+                notify('Netværksfejl ved kopiering', {type: 'error'});
+                if (window.logError) window.logError(e);
+            }
+        },
+
+        // Wrapper for search to use BaseModule's performSearch
+        search(e) {
+            return this.performSearch(e);
+        }
+    }
+);
 </script>
 

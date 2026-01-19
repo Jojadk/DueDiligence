@@ -41,85 +41,72 @@
 <?php endif; ?>
 
 <script>
-const CustomerModule = {
-    search: '<?= esc_js($searchTerm) ?>',
-    page: <?= $page ?>,
+// Brug BaseModule for at reducere dubleret kode
+const CustomerModule = Object.assign(
+    new BaseModule('customer', {
+        titleSingular: 'Kunde',
+        titlePlural: 'Kunder',
+        instanceName: 'CustomerModule',
+        modalSize: 'medium'
+    }),
+    {
+        search: '<?= esc_js($searchTerm) ?>',
+        page: <?= $page ?>,
 
-    openCreate() {
-        Modal.open(this.getForm({}), {size: 'medium', title: 'Ny Kunde'});
-    },
+        // Override getFormFields med kunde-specifikke felter
+        getFormFields(d, id) {
+            return `
+                <div class="form-group">
+                    <label class="required">Firmanavn</label>
+                    <input name="name" value="${escapeHtml(d.name||'')}" required maxlength="255" class="form-control">
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>CVR</label>
+                        <input name="cvr_number" value="${escapeHtml(d.cvr_number||'')}" pattern="^[0-9]{8}$" class="form-control">
+                        <small class="form-help">8 cifre</small>
+                    </div>
+                    <div class="form-group">
+                        <label>Kontakt</label>
+                        <input name="contact_person" value="${escapeHtml(d.contact_person||'')}" class="form-control">
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Email</label>
+                        <input type="email" name="email" value="${escapeHtml(d.email||'')}" class="form-control">
+                    </div>
+                    <div class="form-group">
+                        <label>Telefon</label>
+                        <input name="phone" value="${escapeHtml(d.phone||'')}" class="form-control">
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>Adresse</label>
+                    <input name="address" value="${escapeHtml(d.address||'')}" class="form-control">
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Postnr</label>
+                        <input name="postal_code" value="${escapeHtml(d.postal_code||'')}" class="form-control">
+                    </div>
+                    <div class="form-group">
+                        <label>By</label>
+                        <input name="city" value="${escapeHtml(d.city||'')}" class="form-control">
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>Noter</label>
+                    <textarea name="notes" rows="4" class="form-control">${escapeHtml(d.notes||'')}</textarea>
+                </div>
+            `;
+        },
 
-    async openEdit(id) {
-        try {
-            App.showLoading();
-            const r = await API.get('/', {module: 'customer', action: 'get', id});
-            App.hideLoading();
-            if (r.success) Modal.open(this.getForm(r.data, id), {size: 'medium', title: 'Rediger Kunde'});
-            else notify(r.error, {type: 'error'});
-        } catch(e) { App.hideLoading(); notify('Fejl ved hentning', {type: 'error'}); }
-    },
-
-    getForm(d, id) {
-        return `<form onsubmit="return CustomerModule.submit(event, ${id||null});">
-        <input type="hidden" name="action" value="${id ? 'update' : 'create'}">
-        ${id ? `<input type="hidden" name="id" value="${id}">` : ''}
-        <div class="modal-body"><div id="formErrors"></div>
-        <div class="form-group"><label class="required">Firmanavn</label><input name="name" value="${escapeHtml(d.name||'')}" required maxlength="255" class="form-control"></div>
-        <div class="form-row">
-            <div class="form-group"><label>CVR</label><input name="cvr_number" value="${escapeHtml(d.cvr_number||'')}" pattern="^[0-9]{8}$" class="form-control"><small class="form-help">8 cifre</small></div>
-            <div class="form-group"><label>Kontakt</label><input name="contact_person" value="${escapeHtml(d.contact_person||'')}" class="form-control"></div>
-        </div>
-        <div class="form-row">
-            <div class="form-group"><label>Email</label><input type="email" name="email" value="${escapeHtml(d.email||'')}" class="form-control"></div>
-            <div class="form-group"><label>Telefon</label><input name="phone" value="${escapeHtml(d.phone||'')}" class="form-control"></div>
-        </div>
-        <div class="form-group"><label>Adresse</label><input name="address" value="${escapeHtml(d.address||'')}" class="form-control"></div>
-        <div class="form-row">
-            <div class="form-group"><label>Postnr</label><input name="postal_code" value="${escapeHtml(d.postal_code||'')}" class="form-control"></div>
-            <div class="form-group"><label>By</label><input name="city" value="${escapeHtml(d.city||'')}" class="form-control"></div>
-        </div>
-        <div class="form-group"><label>Noter</label><textarea name="notes" rows="4" class="form-control">${escapeHtml(d.notes||'')}</textarea></div>
-        </div>
-        <div class="modal-footer">
-            <button type="button" class="btn btn-secondary" data-modal-close>Annuller</button>
-            <button type="submit" class="btn btn-primary">${id ? 'Gem' : 'Opret'}</button>
-        </div></form>`;
-    },
-
-    async submit(e, id) {
-        e.preventDefault();
-        const fd = new FormData(e.target);
-        fd.append('module', 'customer');
-        try {
-            const r = await API.post('/', fd, true);
-            if (r.success) { Modal.close(); notify(r.message || 'Gemt', {type: 'success'}); Router.reload(); }
-            else this.showErrors(r.errors || ['Fejl']);
-        } catch(e) { notify('Lagringsfejl', {type: 'error'}); }
-        return false;
-    },
-
-    showErrors(errs) {
-        const el = document.getElementById('formErrors');
-        if (el) { el.innerHTML = `<div class="alert alert-error">${errs.map(e => escapeHtml(e)).join('<br>')}</div>`; el.style.display = 'block'; }
-    },
-
-    async confirmDelete(id, name) {
-        if (await Modal.confirm(`Slet kunde "${name}"?`, {title: 'Bekræft', confirmText: 'Slet', confirmClass: 'btn-danger'})) {
-            const fd = new FormData();
-            fd.append('module', 'customer');
-            fd.append('action', 'delete');
-            fd.append('id', id);
-            try {
-                const r = await API.post('/', fd, true);
-                if (r.success) { notify('Slettet', {type: 'success'}); Router.reload(); }
-                else notify(r.error, {type: 'error'});
-            } catch(e) { notify('Sletningsfejl', {type: 'error'}); }
+        // Wrapper for search to use BaseModule's performSearch
+        search(e) {
+            return this.performSearch(e);
         }
-    },
-
-    search(e) { e.preventDefault(); navigate('customer', {search: document.getElementById('searchInput').value}); return false; },
-    clearSearch() { navigate('customer'); },
-    loadPage(p) { navigate('customer', this.search ? {page: p, search: this.search} : {page: p}); }
-};
+    }
+);
 </script>
 

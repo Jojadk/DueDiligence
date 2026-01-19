@@ -41,118 +41,184 @@
 <?php endif; ?>
 
 <script>
-const BuildingModule = {
-    search: '<?= esc_js($searchTerm) ?>',
-    page: <?= $page ?>,
-    projectSelect: null,
+// Brug BaseModule for at reducere dubleret kode
+const BuildingModule = Object.assign(
+    new BaseModule('building', {
+        titleSingular: 'Bygning',
+        titlePlural: 'Bygninger',
+        instanceName: 'BuildingModule',
+        modalSize: 'large'
+    }),
+    {
+        search: '<?= esc_js($searchTerm) ?>',
+        page: <?= $page ?>,
+        projectSelect: null,
 
-    openCreate() {
-        Modal.open(this.getForm({}), {size: 'large', title: 'Ny Bygning'});
-        setTimeout(() => this.initProjectSelect(null, null), 100);
-    },
-
-    async openEdit(id) {
-        try {
-            App.showLoading();
-            const r = await API.get('/', {module: 'building', action: 'get', id});
-            App.hideLoading();
-            if (r.success) {
-                Modal.open(this.getForm(r.data, id), {size: 'large', title: 'Rediger Bygning'});
-                setTimeout(() => this.initProjectSelect(r.data.project_id, r.data.project_label), 100);
-            }
-            else notify(r.error, {type: 'error'});
-        } catch(e) { App.hideLoading(); notify('Fejl ved hentning', {type: 'error'}); }
-    },
-
-    initProjectSelect(value, label) {
-        const container = document.getElementById('projectSelectContainer');
-        if (container) {
-            this.projectSelect = new SearchableSelect({
-                container: container,
-                name: 'project_id',
-                placeholder: 'Søg og vælg projekt...',
-                searchUrl: '/?module=building&action=search_projects',
-                required: true,
-                value: value,
-                label: label
+        // Override openCreate for at initialisere projectSelect
+        openCreate() {
+            Modal.open(this.getForm({}), {
+                size: this.config.modalSize,
+                title: `Opret ${this.config.titleSingular}`
             });
-        }
-    },
+            setTimeout(() => this.initProjectSelect(null, null), 100);
+        },
 
-    getForm(d, id) {
-        return `<form onsubmit="return BuildingModule.submit(event, ${id||null});">
-        <input type="hidden" name="action" value="${id ? 'update' : 'create'}">
-        ${id ? `<input type="hidden" name="id" value="${id}">` : ''}
-        <div class="modal-body"><div id="formErrors"></div>
-        <div class="form-group"><label class="required">Bygningsnavn</label><input name="name" value="${escapeHtml(d.name||'')}" required class="form-control"></div>
-        <div class="form-group"><label class="required">Projekt</label><div id="projectSelectContainer"></div></div>
-        <div class="form-row">
-            <div class="form-group"><label>Bygningsnummer</label><input name="building_number" value="${escapeHtml(d.building_number||'')}" class="form-control"></div>
-            <div class="form-group"><label>Areal (m²)</label><input type="number" step="0.01" name="area_m2" value="${d.area_m2||''}" class="form-control"></div>
-        </div>
-        <div class="form-row">
-            <div class="form-group"><label>Byggeår</label><input type="number" name="construction_year" value="${d.construction_year||''}" min="1800" max="2100" class="form-control"></div>
-            <div class="form-group"><label>Renoveringsår</label><input type="number" name="renovation_year" value="${d.renovation_year||''}" min="1800" max="2100" class="form-control"></div>
-        </div>
-        <div class="form-row">
-            <div class="form-group"><label>Varmetype</label><select name="heating_type" class="form-control">
-                <option value="">Vælg...</option>
-                <option ${d.heating_type=='fjernvarme'?'selected':''}>fjernvarme</option>
-                <option ${d.heating_type=='naturgas'?'selected':''}>naturgas</option>
-                <option ${d.heating_type=='olie'?'selected':''}>olie</option>
-                <option ${d.heating_type=='el'?'selected':''}>el</option>
-                <option ${d.heating_type=='varmepumpe'?'selected':''}>varmepumpe</option>
-            </select></div>
-            <div class="form-group"><label>Anvendelse</label><select name="usage_type" class="form-control">
-                <option value="">Vælg...</option>
-                <option ${d.usage_type=='bolig'?'selected':''}>bolig</option>
-                <option ${d.usage_type=='erhverv'?'selected':''}>erhverv</option>
-                <option ${d.usage_type=='industri'?'selected':''}>industri</option>
-                <option ${d.usage_type=='offentlig'?'selected':''}>offentlig</option>
-            </select></div>
-        </div>
-        <div class="form-group"><label>Antal etager</label><input type="number" name="floors" value="${d.floors||1}" min="1" max="100" class="form-control"></div>
-        <div class="form-group"><label>Beskrivelse</label><textarea name="description" rows="4" class="form-control">${escapeHtml(d.description||'')}</textarea></div>
-        </div>
-        <div class="modal-footer">
-            <button type="button" class="btn btn-secondary" onclick="Modal.close(); BuildingModule.projectSelect?.destroy();">Annuller</button>
-            <button type="submit" class="btn btn-primary">${id ? 'Gem' : 'Opret'}</button>
-        </div></form>`;
-    },
-
-    async submit(e, id) {
-        e.preventDefault();
-        const fd = new FormData(e.target);
-        fd.append('module', 'building');
-        try {
-            const r = await API.post('/', fd, true);
-            if (r.success) { Modal.close(); this.projectSelect?.destroy(); notify(r.message || 'Gemt', {type: 'success'}); Router.reload(); }
-            else this.showErrors(r.errors || ['Fejl']);
-        } catch(e) { notify('Lagringsfejl', {type: 'error'}); }
-        return false;
-    },
-
-    showErrors(errs) {
-        const el = document.getElementById('formErrors');
-        if (el) { el.innerHTML = `<div class="alert alert-error">${errs.map(e => escapeHtml(e)).join('<br>')}</div>`; el.style.display = 'block'; }
-    },
-
-    async confirmDelete(id, name) {
-        if (await Modal.confirm(`Slet bygning "${name}"?`, {title: 'Bekræft', confirmText: 'Slet', confirmClass: 'btn-danger'})) {
-            const fd = new FormData();
-            fd.append('module', 'building');
-            fd.append('action', 'delete');
-            fd.append('id', id);
+        // Override openEdit for at initialisere projectSelect med data
+        async openEdit(id) {
             try {
-                const r = await API.post('/', fd, true);
-                if (r.success) { notify('Slettet', {type: 'success'}); Router.reload(); }
-                else notify(r.error, {type: 'error'});
-            } catch(e) { notify('Sletningsfejl', {type: 'error'}); }
-        }
-    },
+                App.showLoading();
+                const r = await API.get('/', {
+                    module: this.moduleName,
+                    action: 'get',
+                    id
+                });
+                App.hideLoading();
 
-    search(e) { e.preventDefault(); navigate('building', {search: document.getElementById('searchInput').value}); return false; },
-    clearSearch() { navigate('building'); },
-    loadPage(p) { navigate('building', this.search ? {page: p, search: this.search} : {page: p}); }
-};
+                if (r.success) {
+                    Modal.open(this.getForm(r.data, id), {
+                        size: this.config.modalSize,
+                        title: `Rediger ${this.config.titleSingular}`
+                    });
+                    setTimeout(() => this.initProjectSelect(r.data.project_id, r.data.project_label), 100);
+                } else {
+                    notify(r.error, { type: 'error' });
+                }
+            } catch (e) {
+                App.hideLoading();
+                notify('Fejl ved hentning', { type: 'error' });
+                if (window.logError) window.logError(e);
+            }
+        },
+
+        // Override submit for at rydde op i projectSelect
+        async submit(event, id = null) {
+            event.preventDefault();
+
+            const formData = new FormData(event.target);
+            formData.append('module', this.moduleName);
+            formData.append('action', id ? 'update' : 'create');
+            if (id) formData.append('id', id);
+
+            try {
+                const r = await API.post('/', formData, true);
+
+                if (r.success) {
+                    Modal.close();
+                    this.projectSelect?.destroy();
+                    notify(r.message || 'Gemt', { type: 'success' });
+                    Router.reload();
+                } else {
+                    this.showErrors(r.errors || ['Fejl ved lagring']);
+                }
+            } catch (e) {
+                notify('Lagringsfejl', { type: 'error' });
+                if (window.logError) window.logError(e);
+            }
+
+            return false;
+        },
+
+        // Initialiser SearchableSelect for projekt-valg
+        initProjectSelect(value, label) {
+            const container = document.getElementById('projectSelectContainer');
+            if (container) {
+                this.projectSelect = new SearchableSelect({
+                    container: container,
+                    name: 'project_id',
+                    placeholder: 'Søg og vælg projekt...',
+                    searchUrl: '/?module=building&action=search_projects',
+                    required: true,
+                    value: value,
+                    label: label
+                });
+            }
+        },
+
+        // Override getFormFields med bygnings-specifikke felter
+        getFormFields(d, id) {
+            return `
+                <div class="form-group">
+                    <label class="required">Bygningsnavn</label>
+                    <input name="name" value="${escapeHtml(d.name||'')}" required class="form-control">
+                </div>
+                <div class="form-group">
+                    <label class="required">Projekt</label>
+                    <div id="projectSelectContainer"></div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Bygningsnummer</label>
+                        <input name="building_number" value="${escapeHtml(d.building_number||'')}" class="form-control">
+                    </div>
+                    <div class="form-group">
+                        <label>Areal (m²)</label>
+                        <input type="number" step="0.01" name="area_m2" value="${d.area_m2||''}" class="form-control">
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Byggeår</label>
+                        <input type="number" name="construction_year" value="${d.construction_year||''}" min="1800" max="2100" class="form-control">
+                    </div>
+                    <div class="form-group">
+                        <label>Renoveringsår</label>
+                        <input type="number" name="renovation_year" value="${d.renovation_year||''}" min="1800" max="2100" class="form-control">
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Varmetype</label>
+                        <select name="heating_type" class="form-control">
+                            <option value="">Vælg...</option>
+                            <option ${d.heating_type=='fjernvarme'?'selected':''}>fjernvarme</option>
+                            <option ${d.heating_type=='naturgas'?'selected':''}>naturgas</option>
+                            <option ${d.heating_type=='olie'?'selected':''}>olie</option>
+                            <option ${d.heating_type=='el'?'selected':''}>el</option>
+                            <option ${d.heating_type=='varmepumpe'?'selected':''}>varmepumpe</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Anvendelse</label>
+                        <select name="usage_type" class="form-control">
+                            <option value="">Vælg...</option>
+                            <option ${d.usage_type=='bolig'?'selected':''}>bolig</option>
+                            <option ${d.usage_type=='erhverv'?'selected':''}>erhverv</option>
+                            <option ${d.usage_type=='industri'?'selected':''}>industri</option>
+                            <option ${d.usage_type=='offentlig'?'selected':''}>offentlig</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>Antal etager</label>
+                    <input type="number" name="floors" value="${d.floors||1}" min="1" max="100" class="form-control">
+                </div>
+                <div class="form-group">
+                    <label>Beskrivelse</label>
+                    <textarea name="description" rows="4" class="form-control">${escapeHtml(d.description||'')}</textarea>
+                </div>
+            `;
+        },
+
+        // Custom getForm for at tilføje cleanup i annuller knap
+        getForm(data, id = null) {
+            return `
+                <form onsubmit="return ${this.config.instanceName}.submit(event, ${id || null});">
+                    <div class="modal-body">
+                        <div id="formErrors"></div>
+                        ${this.getFormFields(data, id)}
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" onclick="Modal.close(); ${this.config.instanceName}.projectSelect?.destroy();">Annuller</button>
+                        <button type="submit" class="btn btn-primary">${id ? 'Gem' : 'Opret'}</button>
+                    </div>
+                </form>
+            `;
+        },
+
+        // Wrapper for search to use BaseModule's performSearch
+        search(e) {
+            return this.performSearch(e);
+        }
+    }
+);
 </script>
