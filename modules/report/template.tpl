@@ -4,14 +4,6 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Rapport - <?= htmlspecialchars($project['name']) ?></title>
-    <style>
-        @media print {
-            .no-print { display: none !important; }
-            .page-break { page-break-before: always; }
-            body { background: white; }
-            .card { border: 1px solid #ccc; box-shadow: none; }
-        }
-    </style>
 </head>
 <body>
 
@@ -687,116 +679,6 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 </script>
 
-<style>
-.executive-summary {
-    padding: 1rem 0;
-}
-
-.summary-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-    gap: 1.5rem;
-    margin-bottom: 2rem;
-}
-
-.summary-card {
-    padding: 1.5rem;
-    border: 2px solid var(--color-gray-300);
-    border-radius: 8px;
-    background: white;
-}
-
-.summary-card-primary {
-    border-color: var(--color-primary);
-    background: linear-gradient(135deg, #f8f9ff 0%, white 100%);
-}
-
-.summary-card-danger {
-    border-color: var(--color-danger);
-    background: linear-gradient(135deg, #fff5f5 0%, white 100%);
-}
-
-.summary-label {
-    font-size: 0.875rem;
-    color: var(--color-gray-600);
-    margin-bottom: 0.5rem;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-}
-
-.summary-value {
-    font-size: 2rem;
-    font-weight: bold;
-    color: var(--color-gray-900);
-    margin-bottom: 0.25rem;
-}
-
-.summary-sub {
-    font-size: 0.875rem;
-    color: var(--color-gray-500);
-}
-
-.summary-notes {
-    padding: 1.5rem;
-    background: var(--color-gray-50);
-    border-radius: 8px;
-}
-
-.summary-notes h4 {
-    margin-top: 0;
-}
-
-.summary-notes p {
-    margin-bottom: 1rem;
-}
-
-.tco-breakdown {
-    padding: 1rem 0;
-}
-
-.tco-notes {
-    padding: 1.5rem;
-    background: var(--color-gray-50);
-    border-radius: 8px;
-}
-
-.tco-notes h4 {
-    margin-top: 0;
-}
-
-.tco-notes ul {
-    margin: 1rem 0;
-    padding-left: 1.5rem;
-}
-
-.tco-notes li {
-    margin-bottom: 0.5rem;
-}
-
-.danger-row {
-    background: #fff5f5;
-}
-
-.warning-row {
-    background: #fffaf0;
-}
-
-.total-row {
-    background: var(--color-gray-100);
-    font-weight: bold;
-    border-top: 2px solid var(--color-gray-400);
-}
-
-@media print {
-    .summary-card {
-        break-inside: avoid;
-    }
-
-    table {
-        break-inside: avoid;
-    }
-}
-</style>
 
 </body>
 </html>

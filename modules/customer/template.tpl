@@ -123,23 +123,3 @@ const CustomerModule = {
 };
 </script>
 
-<style>
-.page-header {display: flex; align-items: center; justify-content: space-between; margin-bottom: 24px; padding-bottom: 24px; border-bottom: 2px solid var(--color-gray-200);}
-.page-header h1 {display: flex; align-items: center; gap: 12px; font-size: 30px; font-weight: 700; margin: 0;}
-.subtitle {color: var(--color-gray-600); font-size: 14px;}
-.search-bar {margin-bottom: 24px;}
-.search-bar form {display: flex; gap: 12px;}
-.search-group {position: relative; flex: 1; display: flex; align-items: center;}
-.search-group svg {position: absolute; left: 12px; color: var(--color-gray-400);}
-.search-group input {flex: 1; padding-left: 40px;}
-.btn-clear {position: absolute; right: 8px; padding: 4px; background: transparent; border: none; color: var(--color-gray-400); cursor: pointer; border-radius: 4px;}
-.btn-clear:hover {background: var(--color-gray-100);}
-.stats-card {display: flex; align-items: baseline; gap: 12px; margin-bottom: 24px; padding: 16px; background: white; border-radius: 8px; border: 1px solid var(--color-gray-200);}
-.stats-card .label {font-size: 14px; color: var(--color-gray-600);}
-.stats-card .value {font-size: 24px; font-weight: 700; color: var(--color-primary);}
-.empty-state {display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 64px; text-align: center; background: white; border-radius: 8px; border: 2px dashed var(--color-gray-300);}
-.empty-state svg {color: var(--color-gray-300); margin-bottom: 16px;}
-.empty-state h3 {font-size: 20px; font-weight: 600; margin: 8px 0;}
-.empty-state p {color: var(--color-gray-600); margin-bottom: 24px;}
-.pagination {display: flex; align-items: center; justify-content: center; gap: 16px; margin-top: 24px;}
-</style>
