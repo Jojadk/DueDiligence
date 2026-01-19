@@ -221,7 +221,6 @@
     <script src="/assets/js/api.js"></script>
     <script src="/assets/js/router.js"></script>
     <script src="/assets/js/modal.js"></script>
-    <script src="/assets/js/toast.js"></script>
     <script src="/js/notification-system.js"></script>
     <script src="/js/user-settings.js"></script>
     <script src="/js/upload-system.js"></script>

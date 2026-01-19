@@ -470,6 +470,21 @@ class NotificationSystem {
 window.NotificationSystem = new NotificationSystem();
 window.notify = (message, options) => window.NotificationSystem.show(message, options);
 
+// Backward compatibility alias for Toast
+window.Toast = {
+    show: (message, options) => window.NotificationSystem.show(message, options),
+    success: (message, duration) => window.NotificationSystem.success(message, { duration }),
+    error: (message, duration) => window.NotificationSystem.error(message, { duration }),
+    warning: (message, duration) => window.NotificationSystem.warning(message, { duration }),
+    info: (message, duration) => window.NotificationSystem.info(message, { duration }),
+    dismiss: (notifId) => window.NotificationSystem.dismiss(notifId),
+    clearAll: () => {
+        window.NotificationSystem.notifications.forEach((_, id) => {
+            window.NotificationSystem.dismiss(id);
+        });
+    }
+};
+
 // Wire up notification button
 document.addEventListener('DOMContentLoaded', () => {
     const notifBtn = document.getElementById('notificationBtn');
