@@ -49,7 +49,7 @@
                     <?= icon('chevron-down', 16) ?>
                 </button>
                 <div class="user-dropdown" id="userDropdown">
-                    <a href="#" onclick="navigate('settings'); return false;">
+                    <a href="#" onclick="openSettings(); return false;">
                         <?= icon('settings', 18) ?>
                         Indstillinger
                     </a>
@@ -216,11 +216,16 @@
 
     <!-- Core JavaScript -->
     <script src="/js/error-logger.js"></script>
+    <script src="/js/event-delegation.js"></script>
     <script src="/assets/js/utils.js"></script>
     <script src="/assets/js/api.js"></script>
     <script src="/assets/js/router.js"></script>
     <script src="/assets/js/modal.js"></script>
     <script src="/assets/js/toast.js"></script>
+    <script src="/js/notification-system.js"></script>
+    <script src="/js/user-settings.js"></script>
+    <script src="/js/upload-system.js"></script>
+    <script src="/js/customer-preferences.js"></script>
     <script src="/assets/js/searchable-select.js"></script>
     <script src="/assets/js/components.js"></script>
     <script src="/assets/js/offline-sync.js"></script>
