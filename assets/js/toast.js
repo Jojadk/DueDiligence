@@ -7,22 +7,21 @@ const Toast = {
      * Show a toast notification
      */
     show(message, options = {}) {
-        if (!message) {
-            console.warn('[Toast] No message provided');
-            return null;
-        }
+        if (!message) return null;
 
         const {
-            type = 'info', // success, error, warning, info
+            type = 'info',
             duration = 4000,
-            position = 'top-right', // top-right, top-left, bottom-right, bottom-left, top-center, bottom-center
+            position = 'top-right',
             icon = true,
             dismissible = true
         } = options;
 
         const container = document.getElementById('toastContainer');
         if (!container) {
-            console.error('[Toast] Toast container not found');
+            if (window.logError) {
+                window.logError(new Error('Toast container not found'));
+            }
             return null;
         }
 
@@ -92,10 +91,7 @@ const Toast = {
      * Dismiss a toast
      */
     dismiss(toast) {
-        if (!toast || !toast.classList) {
-            console.warn('[Toast] Invalid toast element');
-            return;
-        }
+        if (!toast || !toast.classList) return;
 
         toast.classList.remove('show');
         setTimeout(() => {

@@ -1,21 +1,30 @@
 /**
  * Modal Management System
+ * - Unique modal instance IDs
+ * - Automatic DOM event cleanup
+ * - Integration with ModalManager for collaboration system
  */
 
 const Modal = {
     activeModals: [],
+    modalIdCounter: 0,
+
+    /**
+     * Generate unique modal instance ID
+     */
+    generateInstanceId(size) {
+        this.modalIdCounter++;
+        return `modal_${size}_${Date.now()}_${this.modalIdCounter}`;
+    },
 
     /**
      * Open a modal
      */
     open(content, options = {}) {
-        if (!content) {
-            console.warn('[Modal] No content provided');
-            return null;
-        }
+        if (!content) return null;
 
         const {
-            size = 'medium', // small, medium, large
+            size = 'medium',
             title = '',
             closeButton = true,
             backdrop = true,
@@ -23,7 +32,6 @@ const Modal = {
             onClose = null
         } = options;
 
-        // Get modal container based on size
         let modalId, contentId;
         switch (size) {
             case 'small':
@@ -43,14 +51,14 @@ const Modal = {
         const contentEl = document.getElementById(contentId);
 
         if (!modalEl || !contentEl) {
-            console.error('[Modal] Modal element not found:', modalId);
+            if (window.logError) {
+                window.logError(new Error('Modal element not found'), { modalId, contentId });
+            }
             return null;
         }
 
-        // Reset modal position to center
         this.resetModalPosition(modalEl, contentEl);
 
-        // Build modal content
         let modalHtml = '';
 
         if (title) {
@@ -73,36 +81,36 @@ const Modal = {
 
         contentEl.innerHTML = modalHtml;
 
-        // Show modal
+        const instanceId = this.generateInstanceId(size);
+        modalEl.dataset.instanceId = instanceId;
+
         modalEl.classList.add('active');
         document.body.classList.add('modal-open');
 
-        // Dispatch modalOpen event for collaboration system
         if (typeof ModalManager !== 'undefined' && ModalManager.open) {
-            ModalManager.open();
+            ModalManager.open(instanceId);
         }
 
-        // Show backdrop
         if (backdrop) {
             const backdropEl = document.getElementById('backdrop');
             if (backdropEl) {
                 backdropEl.classList.add('active');
-                backdropEl.onclick = () => this.close(modalId);
+                const backdropHandler = () => this.close(modalId);
+                backdropEl.onclick = backdropHandler;
+                modalEl.dataset.backdropHandler = 'attached';
             }
         }
 
-        // Add escape key handler
         if (keyboard) {
             const keyHandler = (e) => {
                 if (e.key === 'Escape') {
                     this.close(modalId);
-                    document.removeEventListener('keydown', keyHandler);
                 }
             };
             document.addEventListener('keydown', keyHandler);
+            modalEl._keyHandler = keyHandler;
         }
 
-        // Add close button handlers
         const closeButtons = contentEl.querySelectorAll('[data-modal-close]');
         if (closeButtons && closeButtons.length > 0) {
             closeButtons.forEach(btn => {
@@ -112,20 +120,16 @@ const Modal = {
             });
         }
 
-        // Store modal info
         this.activeModals.push({
             id: modalId,
+            instanceId: instanceId,
             onClose: onClose
         });
 
         return modalId;
     },
 
-    /**
-     * Close a modal
-     */
     close(modalId = null) {
-        // If no ID specified, close the most recent modal
         if (!modalId && this.activeModals.length > 0) {
             const lastModal = this.activeModals[this.activeModals.length - 1];
             modalId = lastModal.id;
@@ -136,55 +140,53 @@ const Modal = {
         const modalEl = document.getElementById(modalId);
         if (!modalEl) return;
 
-        // Hide modal
+        const instanceId = modalEl.dataset.instanceId;
+
+        // Remove keyboard handler
+        if (modalEl._keyHandler) {
+            document.removeEventListener('keydown', modalEl._keyHandler);
+            delete modalEl._keyHandler;
+        }
+
         modalEl.classList.remove('active');
 
-        // Call onClose callback
         const modalInfo = this.activeModals.find(m => m.id === modalId);
         if (modalInfo && modalInfo.onClose) {
             modalInfo.onClose();
         }
 
-        // Remove from active modals
         this.activeModals = this.activeModals.filter(m => m.id !== modalId);
 
-        // Dispatch modalClose event for collaboration system
         if (typeof ModalManager !== 'undefined' && ModalManager.close) {
-            ModalManager.close();
+            ModalManager.close(instanceId);
         }
 
-        // Hide backdrop if no more modals
         if (this.activeModals.length === 0) {
             const backdropEl = document.getElementById('backdrop');
             if (backdropEl) {
                 backdropEl.classList.remove('active');
                 backdropEl.onclick = null;
+                delete backdropEl.dataset.backdropHandler;
             }
             document.body.classList.remove('modal-open');
         }
 
-        // Clear content after animation
         setTimeout(() => {
             const contentId = modalId.replace('Modal', 'ModalContent');
             const contentEl = document.getElementById(contentId);
             if (contentEl) {
                 contentEl.innerHTML = '';
             }
+            delete modalEl.dataset.instanceId;
         }, 300);
     },
 
-    /**
-     * Close all modals
-     */
     closeAll() {
         while (this.activeModals.length > 0) {
             this.close();
         }
     },
 
-    /**
-     * Confirm dialog
-     */
     confirm(message, options = {}) {
         return new Promise((resolve) => {
             const {
@@ -218,10 +220,11 @@ const Modal = {
                 onClose: () => resolve(false)
             });
 
-            // Add button handlers
             const contentEl = document.getElementById('smallModalContent');
             if (!contentEl) {
-                console.error('[Modal] Content element not found for confirm dialog');
+                if (window.logError) {
+                    window.logError(new Error('Content element not found for confirm dialog'));
+                }
                 resolve(false);
                 return;
             }
@@ -245,9 +248,6 @@ const Modal = {
         });
     },
 
-    /**
-     * Alert dialog
-     */
     alert(message, options = {}) {
         return new Promise((resolve) => {
             const {
@@ -276,131 +276,35 @@ const Modal = {
                 onClose: () => resolve()
             });
 
-            // Add button handler
             const contentEl = document.getElementById('smallModalContent');
+            if (!contentEl) {
+                if (window.logError) {
+                    window.logError(new Error('Content element not found for alert dialog'));
+                }
+                resolve();
+                return;
+            }
+
             const okBtn = contentEl.querySelector('[data-action="ok"]');
 
-            okBtn.onclick = () => {
-                this.close(modalId);
-                resolve();
-            };
+            if (okBtn) {
+                okBtn.onclick = () => {
+                    this.close(modalId);
+                    resolve();
+                };
+            }
         });
     },
 
-    /**
-     * Prompt dialog
-     */
-    prompt(message, options = {}) {
-        return new Promise((resolve) => {
-            const {
-                title = 'Indtast værdi',
-                defaultValue = '',
-                placeholder = '',
-                confirmText = 'OK',
-                cancelText = 'Annuller'
-            } = options;
-
-            const content = `
-                <div class="modal-body">
-                    <p>${escapeHtml(message)}</p>
-                    <input
-                        type="text"
-                        class="form-control"
-                        id="promptInput"
-                        value="${escapeHtml(defaultValue)}"
-                        placeholder="${escapeHtml(placeholder)}"
-                    >
-                </div>
-                <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" data-action="cancel">
-                        ${escapeHtml(cancelText)}
-                    </button>
-                    <button type="button" class="btn btn-primary" data-action="confirm">
-                        ${escapeHtml(confirmText)}
-                    </button>
-                </div>
-            `;
-
-            const modalId = this.open(content, {
-                size: 'small',
-                title: title,
-                closeButton: true,
-                backdrop: true,
-                keyboard: true,
-                onClose: () => resolve(null)
-            });
-
-            // Add button handlers
-            const contentEl = document.getElementById('smallModalContent');
-            const input = contentEl.querySelector('#promptInput');
-            const confirmBtn = contentEl.querySelector('[data-action="confirm"]');
-            const cancelBtn = contentEl.querySelector('[data-action="cancel"]');
-
-            // Focus input
-            setTimeout(() => input.focus(), 100);
-
-            confirmBtn.onclick = () => {
-                const value = input.value;
-                this.close(modalId);
-                resolve(value);
-            };
-
-            cancelBtn.onclick = () => {
-                this.close(modalId);
-                resolve(null);
-            };
-
-            // Handle enter key
-            input.addEventListener('keydown', (e) => {
-                if (e.key === 'Enter') {
-                    confirmBtn.click();
-                }
-            });
-        });
-    },
-
-    /**
-     * Reset modal position to center
-     */
     resetModalPosition(modalEl, contentEl) {
-        // Remove any maximized state
-        contentEl.classList.remove('modal-maximized');
+        if (!modalEl || !contentEl) return;
 
-        // Reset scroll position
-        modalEl.scrollTop = 0;
-
-        // Ensure modal content is centered
-        // This happens automatically with CSS flexbox centering
-        // But we can force a reflow to ensure positioning is recalculated
-        void modalEl.offsetHeight;
-    },
-
-    /**
-     * Maximize modal
-     */
-    maximize(modalId) {
-        const contentId = modalId.replace('Modal', 'ModalContent');
-        const contentEl = document.getElementById(contentId);
-
-        if (contentEl) {
-            contentEl.classList.add('modal-maximized');
-        }
-    },
-
-    /**
-     * Restore modal from maximized state
-     */
-    restore(modalId) {
-        const modalEl = document.getElementById(modalId);
-        const contentId = modalId.replace('Modal', 'ModalContent');
-        const contentEl = document.getElementById(contentId);
-
-        if (modalEl && contentEl) {
-            // Reset to center when restoring
-            this.resetModalPosition(modalEl, contentEl);
+        if (contentEl.style) {
+            contentEl.style.transform = '';
+            contentEl.style.top = '';
+            contentEl.style.left = '';
         }
     }
 };
 
-// Export Modal globally
 window.Modal = Modal;

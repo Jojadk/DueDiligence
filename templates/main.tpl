@@ -215,6 +215,7 @@
     </script>
 
     <!-- Core JavaScript -->
+    <script src="/js/error-logger.js"></script>
     <script src="/assets/js/utils.js"></script>
     <script src="/assets/js/api.js"></script>
     <script src="/assets/js/router.js"></script>
