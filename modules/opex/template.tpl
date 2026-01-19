@@ -302,7 +302,7 @@ const OpexModule = {
         const response = await API.post('/api.php', fd, true);
 
         if (!response.success) {
-            Toast.error(response.error || 'Kunne ikke hente kategorier');
+            notify(response.error || 'Kunne ikke hente kategorier');
             return;
         }
 
@@ -333,7 +333,7 @@ const OpexModule = {
                     <textarea name="notes" class="form-control" rows="3"></textarea>
                 </div>
                 <div class="modal-actions">
-                    <button type="button" class="btn-secondary" onclick="Modal.close()">Annuller</button>
+                    <button type="button" class="btn-secondary" data-modal-close>Annuller</button>
                     <button type="submit" class="btn-primary">Tilføj OPEX</button>
                 </div>
             </form>
@@ -352,11 +352,11 @@ const OpexModule = {
         const response = await API.post('/api.php', formData, true);
 
         if (response.success) {
-            Toast.success('OPEX kategori tilføjet');
+            notify('OPEX kategori tilføjet', {type: 'success'});
             Modal.close();
             Router.reload();
         } else {
-            Toast.error(response.error || 'Kunne ikke tilføje kategori');
+            notify(response.error || 'Kunne ikke tilføje kategori');
         }
     },
 
@@ -369,7 +369,7 @@ const OpexModule = {
         const response = await API.post('/api.php', fd, true);
 
         if (!response.success) {
-            Toast.error(response.error || 'Kunne ikke hente data');
+            notify(response.error || 'Kunne ikke hente data');
             return;
         }
 
@@ -393,7 +393,7 @@ const OpexModule = {
                     <textarea name="notes" class="form-control" rows="3">${escapeHtml(assignment.notes || '')}</textarea>
                 </div>
                 <div class="modal-actions">
-                    <button type="button" class="btn-secondary" onclick="Modal.close()">Annuller</button>
+                    <button type="button" class="btn-secondary" data-modal-close>Annuller</button>
                     <button type="submit" class="btn-primary">Gem ændringer</button>
                 </div>
             </form>
@@ -412,11 +412,11 @@ const OpexModule = {
         const response = await API.post('/api.php', formData, true);
 
         if (response.success) {
-            Toast.success('OPEX opdateret');
+            notify('OPEX opdateret', {type: 'success'});
             Modal.close();
             Router.reload();
         } else {
-            Toast.error(response.error || 'Kunne ikke opdatere');
+            notify(response.error || 'Kunne ikke opdatere');
         }
     },
 
@@ -435,10 +435,10 @@ const OpexModule = {
         const response = await API.post('/api.php', fd, true);
 
         if (response.success) {
-            Toast.success('OPEX kategori fjernet');
+            notify('OPEX kategori fjernet', {type: 'success'});
             Router.reload();
         } else {
-            Toast.error(response.error || 'Kunne ikke fjerne kategori');
+            notify(response.error || 'Kunne ikke fjerne kategori');
         }
     },
 
@@ -471,7 +471,7 @@ const OpexModule = {
                     <input type="number" step="0.01" name="rate_per_sqm" class="form-control" required>
                 </div>
                 <div class="modal-actions">
-                    <button type="button" class="btn-secondary" onclick="Modal.close()">Annuller</button>
+                    <button type="button" class="btn-secondary" data-modal-close>Annuller</button>
                     <button type="submit" class="btn-primary">Opret kategori</button>
                 </div>
             </form>
@@ -489,7 +489,7 @@ const OpexModule = {
         const response = await API.post('/api.php', fd, true);
 
         if (!response.success) {
-            Toast.error(response.error || 'Kunne ikke hente data');
+            notify(response.error || 'Kunne ikke hente data');
             return;
         }
 
@@ -523,7 +523,7 @@ const OpexModule = {
                     <input type="number" step="0.01" name="rate_per_sqm" class="form-control" value="${cat.rate_per_sqm}" required>
                 </div>
                 <div class="modal-actions">
-                    <button type="button" class="btn-secondary" onclick="Modal.close()">Annuller</button>
+                    <button type="button" class="btn-secondary" data-modal-close>Annuller</button>
                     <button type="submit" class="btn-primary">Gem ændringer</button>
                 </div>
             </form>
@@ -542,11 +542,11 @@ const OpexModule = {
         const response = await API.post('/api.php', formData, true);
 
         if (response.success) {
-            Toast.success(categoryId ? 'Kategori opdateret' : 'Kategori oprettet');
+            notify(categoryId ? 'Kategori opdateret' : 'Kategori oprettet');
             Modal.close();
             Router.reload();
         } else {
-            Toast.error(response.error || 'Kunne ikke gemme kategori');
+            notify(response.error || 'Kunne ikke gemme kategori');
         }
     },
 
@@ -559,10 +559,10 @@ const OpexModule = {
         const response = await API.post('/api.php', fd, true);
 
         if (response.success) {
-            Toast.success(activate === 'true' ? 'Kategori aktiveret' : 'Kategori deaktiveret');
+            notify(activate === 'true' ? 'Kategori aktiveret' : 'Kategori deaktiveret');
             Router.reload();
         } else {
-            Toast.error(response.error || 'Kunne ikke ændre status');
+            notify(response.error || 'Kunne ikke ændre status');
         }
     },
 
@@ -575,9 +575,9 @@ const OpexModule = {
         const response = await API.post('/api.php', formData, true);
 
         if (response.success) {
-            Toast.success('TCO konfiguration opdateret');
+            notify('TCO konfiguration opdateret', {type: 'success'});
         } else {
-            Toast.error(response.error || 'Kunne ikke gemme konfiguration');
+            notify(response.error || 'Kunne ikke gemme konfiguration');
         }
     }
 };

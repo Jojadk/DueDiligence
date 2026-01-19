@@ -2,11 +2,11 @@
 
 <header class="page-header">
     <div><h1><?= icon('folder', 32) ?> Projekter</h1><p class="subtitle">Administrer dine projekter</p></div>
-    <button class="btn btn-primary" onclick="ProjectModule.openCreate()"><?= icon('plus', 20) ?> Nyt Projekt</button>
+    <button class="btn btn-primary" onclick="ProjectModule.openCreate()"><?= icon('plus', 20) ?> Opret Projekt</button>
 </header>
 
-<?php if ($successMessage): ?><script>Toast.success('<?= esc_js($successMessage) ?>');</script><?php endif; ?>
-<?php if ($errorMessage): ?><script>Toast.error('<?= esc_js($errorMessage) ?>');</script><?php endif; ?>
+<?php if ($successMessage): ?><script>notify('<?= esc_js($successMessage) ?>', {type: 'success'});</script><?php endif; ?>
+<?php if ($errorMessage): ?><script>notify('<?= esc_js($errorMessage) ?>', {type: 'success'});</script><?php endif; ?>
 
 <div class="search-bar">
     <form onsubmit="return ProjectModule.search(event);">
@@ -98,8 +98,8 @@ const ProjectModule = {
                 Modal.open(this.getForm(r.data, id), {size: 'large', title: 'Rediger Projekt'});
                 setTimeout(() => this.initCustomerSelect(r.data.customer_id, r.data.customer_label), 100);
             }
-            else Toast.error(r.error);
-        } catch(e) { App.hideLoading(); Toast.error('Fejl ved hentning'); }
+            else notify(r.error, {type: 'error'});
+        } catch(e) { App.hideLoading(); notify('Fejl ved hentning', {type: 'error'}); }
     },
 
     initCustomerSelect(value, label) {
@@ -154,9 +154,9 @@ const ProjectModule = {
         fd.append('module', 'project');
         try {
             const r = await API.post('/', fd, true);
-            if (r.success) { Modal.close(); this.customerSelect?.destroy(); Toast.success(r.message || 'Gemt'); Router.reload(); }
+            if (r.success) { Modal.close(); this.customerSelect?.destroy(); notify(r.message || 'Gemt', {type: 'success'}); Router.reload(); }
             else this.showErrors(r.errors || ['Fejl']);
-        } catch(e) { Toast.error('Lagringsfejl'); }
+        } catch(e) { notify('Lagringsfejl', {type: 'error'}); }
         return false;
     },
 
@@ -173,9 +173,9 @@ const ProjectModule = {
             fd.append('id', id);
             try {
                 const r = await API.post('/', fd, true);
-                if (r.success) { Toast.success('Slettet'); Router.reload(); }
-                else Toast.error(r.error);
-            } catch(e) { Toast.error('Sletningsfejl'); }
+                if (r.success) { notify('Slettet', {type: 'success'}); Router.reload(); }
+                else notify(r.error, {type: 'error'});
+            } catch(e) { notify('Sletningsfejl', {type: 'error'}); }
         }
     },
 
@@ -202,14 +202,14 @@ const ProjectModule = {
             App.hideLoading();
 
             if (r.success) {
-                Toast.success('Projekt kopieret');
+                notify('Projekt kopieret', {type: 'success'});
                 Router.reload();
             } else {
-                Toast.error(r.error || 'Kunne ikke kopiere projekt');
+                notify(r.error || 'Kunne ikke kopiere projekt');
             }
         } catch(e) {
             App.hideLoading();
-            Toast.error('Netværksfejl ved kopiering');
+            notify('Netværksfejl ved kopiering', {type: 'success'});
         }
     },
 

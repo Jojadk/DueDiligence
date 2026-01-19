@@ -2,11 +2,11 @@
 
 <header class="page-header">
     <div><h1><?= icon('building', 32) ?> Bygninger</h1><p class="subtitle">Administrer bygninger</p></div>
-    <button class="btn btn-primary" onclick="BuildingModule.openCreate()"><?= icon('plus', 20) ?> Ny Bygning</button>
+    <button class="btn btn-primary" onclick="BuildingModule.openCreate()"><?= icon('plus', 20) ?> Opret Bygning</button>
 </header>
 
-<?php if ($successMessage): ?><script>Toast.success('<?= esc_js($successMessage) ?>');</script><?php endif; ?>
-<?php if ($errorMessage): ?><script>Toast.error('<?= esc_js($errorMessage) ?>');</script><?php endif; ?>
+<?php if ($successMessage): ?><script>notify('<?= esc_js($successMessage) ?>', {type: 'success'});</script><?php endif; ?>
+<?php if ($errorMessage): ?><script>notify('<?= esc_js($errorMessage) ?>', {type: 'success'});</script><?php endif; ?>
 
 <div class="search-bar">
     <form onsubmit="return BuildingModule.search(event);">
@@ -60,8 +60,8 @@ const BuildingModule = {
                 Modal.open(this.getForm(r.data, id), {size: 'large', title: 'Rediger Bygning'});
                 setTimeout(() => this.initProjectSelect(r.data.project_id, r.data.project_label), 100);
             }
-            else Toast.error(r.error);
-        } catch(e) { App.hideLoading(); Toast.error('Fejl ved hentning'); }
+            else notify(r.error, {type: 'error'});
+        } catch(e) { App.hideLoading(); notify('Fejl ved hentning', {type: 'error'}); }
     },
 
     initProjectSelect(value, label) {
@@ -126,9 +126,9 @@ const BuildingModule = {
         fd.append('module', 'building');
         try {
             const r = await API.post('/', fd, true);
-            if (r.success) { Modal.close(); this.projectSelect?.destroy(); Toast.success(r.message || 'Gemt'); Router.reload(); }
+            if (r.success) { Modal.close(); this.projectSelect?.destroy(); notify(r.message || 'Gemt', {type: 'success'}); Router.reload(); }
             else this.showErrors(r.errors || ['Fejl']);
-        } catch(e) { Toast.error('Lagringsfejl'); }
+        } catch(e) { notify('Lagringsfejl', {type: 'error'}); }
         return false;
     },
 
@@ -145,9 +145,9 @@ const BuildingModule = {
             fd.append('id', id);
             try {
                 const r = await API.post('/', fd, true);
-                if (r.success) { Toast.success('Slettet'); Router.reload(); }
-                else Toast.error(r.error);
-            } catch(e) { Toast.error('Sletningsfejl'); }
+                if (r.success) { notify('Slettet', {type: 'success'}); Router.reload(); }
+                else notify(r.error, {type: 'error'});
+            } catch(e) { notify('Sletningsfejl', {type: 'error'}); }
         }
     },
 

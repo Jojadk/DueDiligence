@@ -2,11 +2,11 @@
 
 <header class="page-header">
     <div><h1><?= icon('users', 32) ?> Kunder</h1><p class="subtitle">Administrer dine kunder</p></div>
-    <button class="btn btn-primary" onclick="CustomerModule.openCreate()"><?= icon('plus', 20) ?> Ny Kunde</button>
+    <button class="btn btn-primary" onclick="CustomerModule.openCreate()"><?= icon('plus', 20) ?> Opret Kunde</button>
 </header>
 
-<?php if ($successMessage): ?><script>Toast.success('<?= esc_js($successMessage) ?>');</script><?php endif; ?>
-<?php if ($errorMessage): ?><script>Toast.error('<?= esc_js($errorMessage) ?>');</script><?php endif; ?>
+<?php if ($successMessage): ?><script>notify('<?= esc_js($successMessage) ?>', {type: 'success'});</script><?php endif; ?>
+<?php if ($errorMessage): ?><script>notify('<?= esc_js($errorMessage) ?>', {type: 'success'});</script><?php endif; ?>
 
 <div class="search-bar">
     <form onsubmit="return CustomerModule.search(event);">
@@ -55,8 +55,8 @@ const CustomerModule = {
             const r = await API.get('/', {module: 'customer', action: 'get', id});
             App.hideLoading();
             if (r.success) Modal.open(this.getForm(r.data, id), {size: 'medium', title: 'Rediger Kunde'});
-            else Toast.error(r.error);
-        } catch(e) { App.hideLoading(); Toast.error('Fejl ved hentning'); }
+            else notify(r.error, {type: 'error'});
+        } catch(e) { App.hideLoading(); notify('Fejl ved hentning', {type: 'error'}); }
     },
 
     getForm(d, id) {
@@ -81,7 +81,7 @@ const CustomerModule = {
         <div class="form-group"><label>Noter</label><textarea name="notes" rows="4" class="form-control">${escapeHtml(d.notes||'')}</textarea></div>
         </div>
         <div class="modal-footer">
-            <button type="button" class="btn btn-secondary" onclick="Modal.close()">Annuller</button>
+            <button type="button" class="btn btn-secondary" data-modal-close>Annuller</button>
             <button type="submit" class="btn btn-primary">${id ? 'Gem' : 'Opret'}</button>
         </div></form>`;
     },
@@ -92,9 +92,9 @@ const CustomerModule = {
         fd.append('module', 'customer');
         try {
             const r = await API.post('/', fd, true);
-            if (r.success) { Modal.close(); Toast.success(r.message || 'Gemt'); Router.reload(); }
+            if (r.success) { Modal.close(); notify(r.message || 'Gemt', {type: 'success'}); Router.reload(); }
             else this.showErrors(r.errors || ['Fejl']);
-        } catch(e) { Toast.error('Lagringsfejl'); }
+        } catch(e) { notify('Lagringsfejl', {type: 'error'}); }
         return false;
     },
 
@@ -111,9 +111,9 @@ const CustomerModule = {
             fd.append('id', id);
             try {
                 const r = await API.post('/', fd, true);
-                if (r.success) { Toast.success('Slettet'); Router.reload(); }
-                else Toast.error(r.error);
-            } catch(e) { Toast.error('Sletningsfejl'); }
+                if (r.success) { notify('Slettet', {type: 'success'}); Router.reload(); }
+                else notify(r.error, {type: 'error'});
+            } catch(e) { notify('Sletningsfejl', {type: 'error'}); }
         }
     },
 

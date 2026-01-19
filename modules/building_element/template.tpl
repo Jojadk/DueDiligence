@@ -2,11 +2,11 @@
 
 <header class="page-header">
     <div><h1><?= icon('list', 32) ?> Bygningsdele</h1><p class="subtitle">Administrer bygningsdele</p></div>
-    <button class="btn btn-primary" onclick="ElementModule.openCreate()"><?= icon('plus', 20) ?> Ny Bygningsdel</button>
+    <button class="btn btn-primary" onclick="ElementModule.openCreate()"><?= icon('plus', 20) ?> Opret Bygningsdel</button>
 </header>
 
-<?php if ($successMessage): ?><script>Toast.success('<?= esc_js($successMessage) ?>');</script><?php endif; ?>
-<?php if ($errorMessage): ?><script>Toast.error('<?= esc_js($errorMessage) ?>');</script><?php endif; ?>
+<?php if ($successMessage): ?><script>notify('<?= esc_js($successMessage) ?>', {type: 'success'});</script><?php endif; ?>
+<?php if ($errorMessage): ?><script>notify('<?= esc_js($errorMessage) ?>', {type: 'success'});</script><?php endif; ?>
 
 <div class="stats-card"><span class="label">Total elementer:</span><span class="value"><?= number_format($totalElements, 0, ',', '.') ?></span></div>
 
@@ -84,8 +84,8 @@ const ElementModule = {
                     this.initPriceSelect(r.data.price_catalog_id, r.data.price_catalog_label);
                 }, 100);
             }
-            else Toast.error(r.error);
-        } catch(e) { App.hideLoading(); Toast.error('Fejl'); }
+            else notify(r.error, {type: 'error'});
+        } catch(e) { App.hideLoading(); notify('Fejl', {type: 'success'}); }
     },
 
     initBuildingSelect(value, label) {
@@ -175,9 +175,9 @@ const ElementModule = {
         fd.append('module', 'building_element');
         try {
             const r = await API.post('/', fd, true);
-            if (r.success) { Modal.close(); this.cleanup(); Toast.success(r.message || 'Gemt'); Router.reload(); }
+            if (r.success) { Modal.close(); this.cleanup(); notify(r.message || 'Gemt', {type: 'success'}); Router.reload(); }
             else { const el = document.getElementById('formErrors'); if (el) { el.innerHTML = `<div class="alert alert-error">${r.errors.map(e => escapeHtml(e)).join('<br>')}</div>`; el.style.display = 'block'; } }
-        } catch(e) { Toast.error('Lagringsfejl'); }
+        } catch(e) { notify('Lagringsfejl', {type: 'error'}); }
         return false;
     },
 
@@ -189,9 +189,9 @@ const ElementModule = {
             fd.append('id', id);
             try {
                 const r = await API.post('/', fd, true);
-                if (r.success) { Toast.success('Slettet'); Router.reload(); }
-                else Toast.error(r.error);
-            } catch(e) { Toast.error('Sletningsfejl'); }
+                if (r.success) { notify('Slettet', {type: 'success'}); Router.reload(); }
+                else notify(r.error, {type: 'error'});
+            } catch(e) { notify('Sletningsfejl', {type: 'error'}); }
         }
     },
 

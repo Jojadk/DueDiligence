@@ -46,7 +46,7 @@ const DashboardModule = {
             if (response.success) {
                 this.renderStats(response.stats);
             } else {
-                Toast.error('Kunne ikke hente statistik');
+                notify('Kunne ikke hente statistik', {type: 'success'});
             }
         } catch (error) {
             console.error('Stats load error:', error);
@@ -86,7 +86,7 @@ const DashboardModule = {
             if (response.success) {
                 this.renderWidgets(response.widgets);
             } else {
-                Toast.error('Kunne ikke hente widgets');
+                notify('Kunne ikke hente widgets', {type: 'success'});
             }
         } catch (error) {
             console.error('Widgets load error:', error);
@@ -222,7 +222,7 @@ const DashboardModule = {
         await this.loadStats();
         await this.loadWidgets();
         App.hideLoading();
-        Toast.success('Dashboard opdateret');
+        notify('Dashboard opdateret', {type: 'success'});
     }
 };
 
