@@ -1,6 +1,6 @@
 <?php
 /**
- * Sync API - Unified Collaboration Endpoint - Refactored with API Helpers
+ * Sync API - Unified Collaboration Endpoint
  *
  * Consolidates lock management, live updates, and notifications
  * into a single efficient API for multi-user collaboration.
@@ -16,29 +16,20 @@
 require_once __DIR__ . '/../../core/auth.php';
 require_once __DIR__ . '/../../core/db.php';
 require_once __DIR__ . '/../../core/utils.php';
-require_once __DIR__ . '/../../core/api-helpers.php';
 
 /**
  * Get unified state: changes + locks + notifications
  */
 function handle_get_state(array $user): array {
-    // Validate parameters
-    $validation = api_validate_params([
-        'client_id' => ['string', 'POST', true],
-        'record_type' => ['string', 'POST', false, ''],
-        'record_id' => ['int', 'POST', false, null],
-        'since' => ['string', 'POST', false, '']
-    ]);
-
-    if (!$validation['success']) {
-        return api_error($validation['errors']);
-    }
-
-    $clientId = $validation['data']['client_id'];
-    $recordType = $validation['data']['record_type'];
-    $recordId = $validation['data']['record_id'];
-    $since = $validation['data']['since'];
+    $clientId = sanitize_string($_POST['client_id'] ?? '');
+    $recordType = sanitize_string($_POST['record_type'] ?? '');
+    $recordId = isset($_POST['record_id']) ? sanitize_int($_POST['record_id']) : null;
+    $since = sanitize_string($_POST['since'] ?? '');
     $activeLocks = $_POST['active_locks'] ?? [];
+
+    if (empty($clientId)) {
+        return error_response('client_id er påkrævet');
+    }
 
     $response = [
         'success' => true,
@@ -97,6 +88,11 @@ function get_changes_since(string $recordType, ?int $recordId, string $since): a
 
 /**
  * Get lock status for multiple locks
+ *
+ * @param array $lockKeys Array of lock keys in format "record_type:record_id:field_name"
+ * @param int $userId Current user ID
+ * @param string $clientId Current client ID
+ * @return array Lock status for each requested lock
  */
 function get_lock_status(array $lockKeys, int $userId, string $clientId): array {
     $locks = [];
@@ -190,34 +186,22 @@ function get_recent_notifications(int $userId, string $since): array {
  * Acquire lock on record
  */
 function handle_acquire(array $user): array {
-    // Validate CSRF
-    $csrfCheck = api_require_csrf();
-    if (!$csrfCheck['success']) {
-        return $csrfCheck;
+    csrf_require();
+
+    $recordType = sanitize_string($_POST['record_type'] ?? '');
+    $recordId = sanitize_int($_POST['record_id'] ?? 0);
+    $fieldName = isset($_POST['field_name']) ? sanitize_string($_POST['field_name']) : null;
+    $clientId = sanitize_string($_POST['client_id'] ?? '');
+
+    if (empty($recordType) || empty($recordId) || empty($clientId)) {
+        return error_response('record_type, record_id og client_id er påkrævet');
     }
-
-    // Validate parameters
-    $validation = api_validate_params([
-        'record_type' => ['string', 'POST', true],
-        'record_id' => ['int', 'POST', true],
-        'field_name' => ['string', 'POST', false, null],
-        'client_id' => ['string', 'POST', true]
-    ]);
-
-    if (!$validation['success']) {
-        return api_error($validation['errors']);
-    }
-
-    $recordType = $validation['data']['record_type'];
-    $recordId = $validation['data']['record_id'];
-    $fieldName = $validation['data']['field_name'];
-    $clientId = $validation['data']['client_id'];
 
     // Check project access
     try {
         require_project_access($user, $recordType, $recordId, 'editor');
     } catch (Exception $e) {
-        return api_error($e->getMessage());
+        return error_response($e->getMessage());
     }
 
     // Attempt to acquire lock
@@ -246,35 +230,23 @@ function handle_acquire(array $user): array {
         ];
     }
 
-    return api_error('Kunne ikke låse record');
+    return error_response('Kunne ikke låse record');
 }
 
 /**
  * Release lock on record
  */
 function handle_release(array $user): array {
-    // Validate CSRF
-    $csrfCheck = api_require_csrf();
-    if (!$csrfCheck['success']) {
-        return $csrfCheck;
+    csrf_require();
+
+    $recordType = sanitize_string($_POST['record_type'] ?? '');
+    $recordId = sanitize_int($_POST['record_id'] ?? 0);
+    $fieldName = isset($_POST['field_name']) ? sanitize_string($_POST['field_name']) : null;
+    $clientId = sanitize_string($_POST['client_id'] ?? '');
+
+    if (empty($recordType) || empty($recordId)) {
+        return error_response('record_type og record_id er påkrævet');
     }
-
-    // Validate parameters
-    $validation = api_validate_params([
-        'record_type' => ['string', 'POST', true],
-        'record_id' => ['int', 'POST', true],
-        'field_name' => ['string', 'POST', false, null],
-        'client_id' => ['string', 'POST', false, '']
-    ]);
-
-    if (!$validation['success']) {
-        return api_error($validation['errors']);
-    }
-
-    $recordType = $validation['data']['record_type'];
-    $recordId = $validation['data']['record_id'];
-    $fieldName = $validation['data']['field_name'];
-    $clientId = $validation['data']['client_id'];
 
     $params = [
         'record_type' => $recordType,
@@ -310,26 +282,17 @@ function handle_release(array $user): array {
  * Batch heartbeat for multiple locks
  */
 function handle_heartbeat(array $user): array {
-    // Validate CSRF
-    $csrfCheck = api_require_csrf();
-    if (!$csrfCheck['success']) {
-        return $csrfCheck;
-    }
+    csrf_require();
 
-    // Validate parameters
-    $validation = api_validate_params([
-        'client_id' => ['string', 'POST', true]
-    ]);
-
-    if (!$validation['success']) {
-        return api_error($validation['errors']);
-    }
-
-    $clientId = $validation['data']['client_id'];
     $locks = $_POST['locks'] ?? [];
+    $clientId = sanitize_string($_POST['client_id'] ?? '');
 
     if (!is_array($locks) || empty($locks)) {
-        return api_error('locks array er påkrævet');
+        return error_response('locks array er påkrævet');
+    }
+
+    if (empty($clientId)) {
+        return error_response('client_id er påkrævet');
     }
 
     $updated = 0;
@@ -381,7 +344,7 @@ function handle_heartbeat(array $user): array {
 function handle_cleanup(array $user): array {
     // Only allow admins or system to cleanup
     if ($user['role'] !== 'admin') {
-        return api_error('Ikke autoriseret');
+        return error_response('Ikke autoriseret');
     }
 
     $count = db_value("SELECT cleanup_stale_locks()");
@@ -393,34 +356,22 @@ function handle_cleanup(array $user): array {
  * Log a record change
  */
 function handle_log_change(array $user): array {
-    // Validate CSRF
-    $csrfCheck = api_require_csrf();
-    if (!$csrfCheck['success']) {
-        return $csrfCheck;
+    csrf_require();
+
+    $recordType = sanitize_string($_POST['record_type'] ?? '');
+    $recordId = sanitize_int($_POST['record_id'] ?? 0);
+    $fieldName = isset($_POST['field_name']) ? sanitize_string($_POST['field_name']) : null;
+    $changeType = sanitize_string($_POST['change_type'] ?? 'update');
+
+    if (empty($recordType) || empty($recordId)) {
+        return error_response('record_type og record_id er påkrævet');
     }
-
-    // Validate parameters
-    $validation = api_validate_params([
-        'record_type' => ['string', 'POST', true],
-        'record_id' => ['int', 'POST', true],
-        'field_name' => ['string', 'POST', false, null],
-        'change_type' => ['string', 'POST', false, 'update']
-    ]);
-
-    if (!$validation['success']) {
-        return api_error($validation['errors']);
-    }
-
-    $recordType = $validation['data']['record_type'];
-    $recordId = $validation['data']['record_id'];
-    $fieldName = $validation['data']['field_name'];
-    $changeType = $validation['data']['change_type'];
 
     // Check project access
     try {
         require_project_access($user, $recordType, $recordId, 'editor');
     } catch (Exception $e) {
-        return api_error($e->getMessage());
+        return error_response($e->getMessage());
     }
 
     db_execute("
