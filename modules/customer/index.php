@@ -1,148 +1,185 @@
 <?php
 /**
- * Customer Module
- * CRUD operations for customers
+ * Customer Module - Refactored
+ * CRUD operations for customers using API helpers
  */
+
+require_once __DIR__ . '/../../core/api-helpers.php';
+
+// Helper function to check if request is AJAX
+function is_ajax_request(): bool {
+    return !empty($_SERVER['HTTP_X_REQUESTED_WITH']) &&
+           strtolower($_SERVER['HTTP_X_REQUESTED_WITH']) === 'xmlhttprequest';
+}
+
+// Helper function to send JSON response
+function json_response(array $data): void {
+    header('Content-Type: application/json');
+    echo json_encode($data);
+    exit;
+}
 
 // Get action
 $action = $_GET['action'] ?? 'list';
 $id = $_GET['id'] ?? null;
 
-// Handle form submissions
+// ============================================
+// HANDLE FORM SUBMISSIONS (CREATE/UPDATE)
+// ============================================
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    csrf_require();
+    // Check CSRF
+    if ($error = api_require_csrf()) {
+        if (is_ajax_request()) {
+            json_response($error);
+        }
+        redirect('/?module=customer&error=' . urlencode($error['error']));
+    }
 
     $action = $_POST['action'] ?? 'create';
     $id = $_POST['id'] ?? null;
 
-    // Validate form data
-    $errors = validate_form('customer', $_POST);
+    // Validate and sanitize all parameters
+    $validation = api_validate_params([
+        'name' => ['string', 'POST', true],
+        'cvr_number' => ['string', 'POST', false, ''],
+        'contact_person' => ['string', 'POST', false, ''],
+        'email' => ['email', 'POST', false, ''],
+        'phone' => ['string', 'POST', false, ''],
+        'address' => ['string', 'POST', false, ''],
+        'postal_code' => ['string', 'POST', false, ''],
+        'city' => ['string', 'POST', false, ''],
+        'notes' => ['string', 'POST', false, '']
+    ]);
 
-    if (empty($errors)) {
-        // Prepare data
-        $data = [
-            'name' => sanitize_string($_POST['name']),
-            'cvr_number' => sanitize_string($_POST['cvr_number'] ?? ''),
-            'contact_person' => sanitize_string($_POST['contact_person'] ?? ''),
-            'email' => sanitize_email($_POST['email'] ?? ''),
-            'phone' => sanitize_string($_POST['phone'] ?? ''),
-            'address' => sanitize_string($_POST['address'] ?? ''),
-            'postal_code' => sanitize_string($_POST['postal_code'] ?? ''),
-            'city' => sanitize_string($_POST['city'] ?? ''),
-            'notes' => sanitize_string($_POST['notes'] ?? '')
-        ];
+    if (!$validation['success']) {
+        if (is_ajax_request()) {
+            json_response(api_error($validation['errors']));
+        }
 
-        try {
-            if ($action === 'create') {
-                // Insert new customer
-                $customerId = db_insert('customers', $data);
+        redirect('/?module=customer&error=' . urlencode(implode(', ', $validation['errors'])));
+    }
 
+    $data = $validation['data'];
+
+    // CREATE
+    if ($action === 'create') {
+        $result = api_crud_create(
+            'customers',
+            $data,
+            null, // No before insert callback needed
+            function($customerId) {
                 log_activity('customer_created', 'customer', $customerId);
-
-                // Return JSON response for AJAX
-                if (!empty($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower($_SERVER['HTTP_X_REQUESTED_WITH']) === 'xmlhttprequest') {
-                    header('Content-Type: application/json');
-                    echo json_encode(['success' => true, 'id' => $customerId, 'message' => 'Kunde oprettet']);
-                    exit;
-                }
-
-                redirect('/?module=customer&success=created');
-
-            } elseif ($action === 'update' && $id) {
-                // Update existing customer
-                db_update('customers', $data, 'id = :id', ['id' => $id]);
-
-                log_activity('customer_updated', 'customer', $id);
-
-                // Return JSON response for AJAX
-                if (!empty($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower($_SERVER['HTTP_X_REQUESTED_WITH']) === 'xmlhttprequest') {
-                    header('Content-Type: application/json');
-                    echo json_encode(['success' => true, 'id' => $id, 'message' => 'Kunde opdateret']);
-                    exit;
-                }
-
-                redirect('/?module=customer&success=updated');
             }
-        } catch (Exception $e) {
-            log_error('Customer save error: ' . $e->getMessage());
-            $errors[] = 'Der opstod en fejl ved lagring';
+        );
+
+        if (is_ajax_request()) {
+            json_response($result);
+        }
+
+        if ($result['success']) {
+            redirect('/?module=customer&success=created');
+        } else {
+            redirect('/?module=customer&error=' . urlencode($result['error']));
         }
     }
 
-    // Return errors for AJAX
-    if (!empty($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower($_SERVER['HTTP_X_REQUESTED_WITH']) === 'xmlhttprequest') {
-        header('Content-Type: application/json');
-        echo json_encode(['success' => false, 'errors' => $errors]);
-        exit;
+    // UPDATE
+    elseif ($action === 'update' && $id) {
+        $result = api_crud_update(
+            'customers',
+            $id,
+            $data,
+            null, // No permission check needed (handled by base system)
+            function($customerId) {
+                log_activity('customer_updated', 'customer', $customerId);
+            }
+        );
+
+        if (is_ajax_request()) {
+            json_response($result);
+        }
+
+        if ($result['success']) {
+            redirect('/?module=customer&success=updated');
+        } else {
+            redirect('/?module=customer&error=' . urlencode($result['error']));
+        }
     }
 }
 
-// Handle delete action
+// ============================================
+// HANDLE DELETE
+// ============================================
+
 if ($action === 'delete' && $id) {
-    csrf_require();
+    if ($error = api_require_csrf()) {
+        if (is_ajax_request()) {
+            json_response($error);
+        }
+        redirect('/?module=customer&error=' . urlencode($error['error']));
+    }
 
-    try {
-        // Check if customer has projects
-        $projectCount = db_value("SELECT COUNT(*) FROM projects WHERE customer_id = :id", ['id' => $id]);
+    $result = api_crud_delete(
+        'customers',
+        $id,
+        null, // No permission check
+        function($customerId) {
+            // Check if customer has projects (before delete callback)
+            $projectCount = db_value(
+                "SELECT COUNT(*) FROM projects WHERE customer_id = :id",
+                ['id' => $customerId]
+            );
 
-        if ($projectCount > 0) {
-            $error = "Kan ikke slette kunde med $projectCount projekt(er)";
-
-            if (!empty($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower($_SERVER['HTTP_X_REQUESTED_WITH']) === 'xmlhttprequest') {
-                header('Content-Type: application/json');
-                echo json_encode(['success' => false, 'error' => $error]);
-                exit;
+            if ($projectCount > 0) {
+                return api_error("Kan ikke slette kunde med $projectCount projekt(er)");
             }
 
-            redirect('/?module=customer&error=' . urlencode($error));
+            return ['success' => true];
         }
+    );
 
-        db_delete('customers', 'id = :id', ['id' => $id]);
+    if (is_ajax_request()) {
+        json_response($result);
+    }
 
-        log_activity('customer_deleted', 'customer', $id);
-
-        if (!empty($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower($_SERVER['HTTP_X_REQUESTED_WITH']) === 'xmlhttprequest') {
-            header('Content-Type: application/json');
-            echo json_encode(['success' => true, 'message' => 'Kunde slettet']);
-            exit;
-        }
-
+    if ($result['success']) {
         redirect('/?module=customer&success=deleted');
-
-    } catch (Exception $e) {
-        log_error('Customer delete error: ' . $e->getMessage());
-        $error = 'Der opstod en fejl ved sletning';
-
-        if (!empty($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower($_SERVER['HTTP_X_REQUESTED_WITH']) === 'xmlhttprequest') {
-            header('Content-Type: application/json');
-            echo json_encode(['success' => false, 'error' => $error]);
-            exit;
-        }
-
-        redirect('/?module=customer&error=' . urlencode($error));
-    }
-}
-
-// Handle get single customer (for AJAX edit)
-if ($action === 'get' && $id) {
-    $customer = db_fetch("SELECT * FROM customers WHERE id = :id", ['id' => $id]);
-
-    if ($customer) {
-        header('Content-Type: application/json');
-        echo json_encode(['success' => true, 'data' => $customer]);
     } else {
-        header('Content-Type: application/json');
-        echo json_encode(['success' => false, 'error' => 'Kunde ikke fundet']);
+        redirect('/?module=customer&error=' . urlencode($result['error']));
     }
-    exit;
 }
 
-// Get list of customers
-$searchTerm = $_GET['search'] ?? '';
-$page = max(1, (int)($_GET['page'] ?? 1));
+// ============================================
+// HANDLE GET SINGLE CUSTOMER (AJAX)
+// ============================================
+
+if ($action === 'get' && $id) {
+    $result = api_get_entity(
+        'customers',
+        $id,
+        $currentUser,
+        null, // No permission check
+        'Kunde ikke fundet'
+    );
+
+    if ($result['success']) {
+        json_response(api_success(['data' => $result['data']]));
+    } else {
+        json_response($result);
+    }
+}
+
+// ============================================
+// GET LIST OF CUSTOMERS WITH PAGINATION
+// ============================================
+
+$searchTerm = sanitize_string($_GET['search'] ?? '');
+$page = max(1, sanitize_int($_GET['page'] ?? 1));
 $perPage = 50;
 $offset = ($page - 1) * $perPage;
 
+// Build query with filters
 $whereClauses = [];
 $params = [];
 
@@ -157,7 +194,7 @@ $where = !empty($whereClauses) ? 'WHERE ' . implode(' AND ', $whereClauses) : ''
 $totalCustomers = db_value("SELECT COUNT(*) FROM customers $where", $params);
 $totalPages = ceil($totalCustomers / $perPage);
 
-// Get customers
+// Get customers with project count
 $customers = db_query("
     SELECT
         c.*,
@@ -175,17 +212,12 @@ $successMessage = '';
 $errorMessage = '';
 
 if (isset($_GET['success'])) {
-    switch ($_GET['success']) {
-        case 'created':
-            $successMessage = 'Kunde oprettet succesfuldt';
-            break;
-        case 'updated':
-            $successMessage = 'Kunde opdateret succesfuldt';
-            break;
-        case 'deleted':
-            $successMessage = 'Kunde slettet succesfuldt';
-            break;
-    }
+    $successMessages = [
+        'created' => 'Kunde oprettet succesfuldt',
+        'updated' => 'Kunde opdateret succesfuldt',
+        'deleted' => 'Kunde slettet succesfuldt'
+    ];
+    $successMessage = $successMessages[$_GET['success']] ?? '';
 }
 
 if (isset($_GET['error'])) {
