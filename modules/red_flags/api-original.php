@@ -1,6 +1,6 @@
 <?php
 /**
- * Red Flags Module API - Refactored with API Helpers
+ * Red Flags Module API
  *
  * Handles red flag detection and reporting
  * OPTIMIZED: Uses v_red_flags view with pre-calculated scores
@@ -10,8 +10,6 @@
  * - get_summary: Get red flags summary statistics
  */
 
-require_once __DIR__ . '/../../core/api-helpers.php';
-
 /**
  * Get red flags list
  * OPTIMIZED: Uses v_red_flags view with pre-calculated scores
@@ -19,16 +17,7 @@ require_once __DIR__ . '/../../core/api-helpers.php';
  * GET /api.php?module=red_flags&action=get_list&project_id=123
  */
 function handle_get_list(array $user): array {
-    // Validate parameters
-    $validation = api_validate_params([
-        'project_id' => ['int', 'GET', false, null]
-    ]);
-
-    if (!$validation['success']) {
-        return api_error($validation['errors']);
-    }
-
-    $projectId = $validation['data']['project_id'];
+    $projectId = isset($_GET['project_id']) ? sanitize_int($_GET['project_id']) : null;
 
     // Build WHERE clause based on permissions
     $where = [];
@@ -36,9 +25,8 @@ function handle_get_list(array $user): array {
 
     if ($projectId) {
         // Verify project access
-        $accessCheck = api_require_project_access($user, $projectId, 'viewer');
-        if (!$accessCheck['success']) {
-            return $accessCheck;
+        if (!can_access_project($user, $projectId, 'viewer')) {
+            return ['success' => false, 'error' => 'No access to this project'];
         }
 
         $where[] = 'project_id = :project_id';
@@ -168,16 +156,7 @@ function handle_get_list(array $user): array {
  * GET /api.php?module=red_flags&action=get_summary&project_id=123
  */
 function handle_get_summary(array $user): array {
-    // Validate parameters
-    $validation = api_validate_params([
-        'project_id' => ['int', 'GET', false, null]
-    ]);
-
-    if (!$validation['success']) {
-        return api_error($validation['errors']);
-    }
-
-    $projectId = $validation['data']['project_id'];
+    $projectId = isset($_GET['project_id']) ? sanitize_int($_GET['project_id']) : null;
 
     // Build WHERE clause
     $where = [];
@@ -185,9 +164,8 @@ function handle_get_summary(array $user): array {
 
     if ($projectId) {
         // Verify project access
-        $accessCheck = api_require_project_access($user, $projectId, 'viewer');
-        if (!$accessCheck['success']) {
-            return $accessCheck;
+        if (!can_access_project($user, $projectId, 'viewer')) {
+            return ['success' => false, 'error' => 'No access to this project'];
         }
 
         $where[] = 'project_id = :project_id';
