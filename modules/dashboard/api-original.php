@@ -1,6 +1,6 @@
 <?php
 /**
- * Dashboard Module API - Refactored with API Helpers
+ * Dashboard Module API
  *
  * Handles dashboard statistics and widgets
  * All functions must be named: handle_{action}
@@ -8,10 +8,7 @@
  * Available actions:
  * - get_stats: Dashboard statistics (optimized)
  * - get_widgets: Dashboard widgets (recent projects, urgent items)
- * - get_activity: Get recent activity for user
  */
-
-require_once __DIR__ . '/../../core/api-helpers.php';
 
 /**
  * Get dashboard statistics
@@ -150,18 +147,8 @@ function handle_get_widgets(array $user): array {
  * GET /api.php?module=dashboard&action=get_activity
  */
 function handle_get_activity(array $user): array {
-    // Validate parameters
-    $validation = api_validate_params([
-        'limit' => ['int', 'GET', false, 20],
-        'offset' => ['int', 'GET', false, 0]
-    ]);
-
-    if (!$validation['success']) {
-        return api_error($validation['errors']);
-    }
-
-    $limit = $validation['data']['limit'];
-    $offset = $validation['data']['offset'];
+    $limit = sanitize_int($_GET['limit'] ?? 20);
+    $offset = sanitize_int($_GET['offset'] ?? 0);
 
     $activity = db_fetch_all("
         SELECT *
