@@ -17,13 +17,14 @@
  */
 
 require_once __DIR__ . '/../../core/permissions.php';
-require_once __DIR__ . '/../../core/api-helpers.php';
 
 /**
  * Get available template variables
  * GET ?module=report_builder&action=get_variables&project_id=X
  */
 function handle_get_variables(array $user): array {
+    $projectId = isset($_GET['project_id']) ? sanitize_int($_GET['project_id']) : null;
+
     $variables = [
         'project' => [
             'label' => 'Projekt',
@@ -115,31 +116,25 @@ function handle_get_variables(array $user): array {
  * POST ?module=report_builder&action=preview
  */
 function handle_preview(array $user): array {
-    $csrfCheck = api_require_csrf();
-    if (!$csrfCheck['success']) return $csrfCheck;
+    csrf_require();
 
-    $validation = api_validate_params([
-        'project_id' => ['int', 'POST', true],
-        'template' => ['string', 'POST', true]
-    ]);
+    $projectId = sanitize_int($_POST['project_id'] ?? 0);
+    $template = $_POST['template'] ?? '';
 
-    if (!$validation['success']) {
-        return $validation;
+    if (!$projectId || !$template) {
+        return ['success' => false, 'error' => 'Projekt ID og template er påkrævet'];
     }
 
-    $params = $validation['data'];
-
     // Check project access
-    $accessCheck = api_require_project_access($user, $params['project_id'], 'viewer');
-    if (!$accessCheck['success']) {
-        return $accessCheck;
+    if (!can_access_project($user, $projectId, 'viewer')) {
+        return ['success' => false, 'error' => 'Ingen adgang til projektet'];
     }
 
     // Get project data
-    $data = get_report_data($params['project_id']);
+    $data = get_report_data($projectId);
 
     // Render template
-    $rendered = render_template($params['template'], $data);
+    $rendered = render_template($template, $data);
 
     return [
         'success' => true,
@@ -152,63 +147,54 @@ function handle_preview(array $user): array {
  * POST ?module=report_builder&action=save
  */
 function handle_save(array $user): array {
-    $csrfCheck = api_require_csrf();
-    if (!$csrfCheck['success']) return $csrfCheck;
+    csrf_require();
 
-    $validation = api_validate_params([
-        'id' => ['int', 'POST', false, null],
-        'name' => ['string', 'POST', true],
-        'template' => ['string', 'POST', true],
-        'report_type' => ['string', 'POST', false, 'custom']
-    ]);
+    $id = isset($_POST['id']) ? sanitize_int($_POST['id']) : null;
+    $name = sanitize_string($_POST['name'] ?? '');
+    $template = $_POST['template'] ?? '';
+    $reportType = sanitize_string($_POST['report_type'] ?? 'custom');
 
-    if (!$validation['success']) {
-        return $validation;
+    if (!$name || !$template) {
+        return ['success' => false, 'error' => 'Navn og template er påkrævet'];
     }
 
-    $params = $validation['data'];
-
-    if ($params['id']) {
-        // Update existing
-        return api_crud_update(
-            'report_templates',
-            $params['id'],
-            [
-                'name' => $params['name'],
-                'template_content' => $params['template'],
-                'report_type' => $params['report_type'],
+    db_begin_transaction();
+    try {
+        if ($id) {
+            // Update existing
+            db_update('report_templates', [
+                'name' => $name,
+                'template_content' => $template,
+                'report_type' => $reportType,
                 'updated_at' => date('Y-m-d H:i:s')
-            ],
-            null,
-            function($templateId) {
-                log_activity('report_template_saved', 'report_template', $templateId);
-                return ['template_id' => $templateId, 'message' => 'Template opdateret'];
-            }
-        );
-    } else {
-        // Create new
-        $result = api_crud_create(
-            'report_templates',
-            [
-                'name' => $params['name'],
-                'template_content' => $params['template'],
-                'report_type' => $params['report_type'],
+            ], 'id = :id', ['id' => $id]);
+
+            $templateId = $id;
+        } else {
+            // Create new
+            $templateId = db_insert('report_templates', [
+                'name' => $name,
+                'template_content' => $template,
+                'report_type' => $reportType,
                 'created_by_user_id' => $user['id'],
                 'created_at' => date('Y-m-d H:i:s'),
                 'updated_at' => date('Y-m-d H:i:s')
-            ],
-            null,
-            function($templateId) {
-                log_activity('report_template_saved', 'report_template', $templateId);
-            }
-        );
-
-        if ($result['success']) {
-            $result['template_id'] = $result['id'];
-            $result['message'] = 'Template oprettet';
+            ]);
         }
 
-        return $result;
+        db_commit();
+
+        log_activity('report_template_saved', 'report_template', $templateId);
+
+        return [
+            'success' => true,
+            'template_id' => $templateId,
+            'message' => 'Template gemt'
+        ];
+
+    } catch (Exception $e) {
+        db_rollback();
+        return ['success' => false, 'error' => 'Kunne ikke gemme template'];
     }
 }
 
@@ -217,64 +203,63 @@ function handle_save(array $user): array {
  * POST ?module=report_builder&action=render
  */
 function handle_render(array $user): array {
-    $csrfCheck = api_require_csrf();
-    if (!$csrfCheck['success']) return $csrfCheck;
+    csrf_require();
 
-    $validation = api_validate_params([
-        'project_id' => ['int', 'POST', true],
-        'template_id' => ['int', 'POST', true]
-    ]);
+    $projectId = sanitize_int($_POST['project_id'] ?? 0);
+    $templateId = sanitize_int($_POST['template_id'] ?? 0);
 
-    if (!$validation['success']) {
-        return $validation;
+    if (!$projectId || !$templateId) {
+        return ['success' => false, 'error' => 'Projekt ID og template ID er påkrævet'];
     }
 
-    $params = $validation['data'];
-
     // Check project access
-    $accessCheck = api_require_project_access($user, $params['project_id'], 'viewer');
-    if (!$accessCheck['success']) {
-        return $accessCheck;
+    if (!can_access_project($user, $projectId, 'viewer')) {
+        return ['success' => false, 'error' => 'Ingen adgang til projektet'];
     }
 
     // Get template
     $template = db_fetch("
         SELECT * FROM report_templates WHERE id = :id
-    ", ['id' => $params['template_id']]);
+    ", ['id' => $templateId]);
 
     if (!$template) {
-        return api_error('Template ikke fundet');
+        return ['success' => false, 'error' => 'Template ikke fundet'];
     }
 
     // Get project data
-    $data = get_report_data($params['project_id']);
+    $data = get_report_data($projectId);
 
     // Render template
     $rendered = render_template($template['template_content'], $data);
 
-    return api_transaction(
-        function() use ($params, $data, $template, $rendered, $user) {
-            // Save rendered report
-            $reportId = db_insert('reports', [
-                'project_id' => $params['project_id'],
-                'title' => $data['project']['name'] . ' - ' . $template['name'],
-                'report_type' => $template['report_type'],
-                'rich_text_content' => $rendered,
-                'wysiwyg_enabled' => true,
-                'generated_by_user_id' => $user['id'],
-                'created_at' => date('Y-m-d H:i:s')
-            ]);
+    db_begin_transaction();
+    try {
+        // Save rendered report
+        $reportId = db_insert('reports', [
+            'project_id' => $projectId,
+            'title' => $data['project']['name'] . ' - ' . $template['name'],
+            'report_type' => $template['report_type'],
+            'rich_text_content' => $rendered,
+            'wysiwyg_enabled' => true,
+            'generated_by_user_id' => $user['id'],
+            'created_at' => date('Y-m-d H:i:s')
+        ]);
 
-            log_activity('report_rendered', 'report', $reportId);
+        db_commit();
 
-            return [
-                'report_id' => $reportId,
-                'rendered' => $rendered
-            ];
-        },
-        'Rapport genereret',
-        'Kunne ikke gemme rapport'
-    );
+        log_activity('report_rendered', 'report', $reportId);
+
+        return [
+            'success' => true,
+            'report_id' => $reportId,
+            'rendered' => $rendered,
+            'message' => 'Rapport genereret'
+        ];
+
+    } catch (Exception $e) {
+        db_rollback();
+        return ['success' => false, 'error' => 'Kunne ikke gemme rapport'];
+    }
 }
 
 /**
@@ -282,22 +267,18 @@ function handle_render(array $user): array {
  * GET ?module=report_builder&action=get_template&id=X
  */
 function handle_get_template(array $user): array {
-    $validation = api_validate_params([
-        'id' => ['int', 'GET', true]
-    ]);
+    $templateId = sanitize_int($_GET['id'] ?? 0);
 
-    if (!$validation['success']) {
-        return $validation;
+    if (!$templateId) {
+        return ['success' => false, 'error' => 'Template ID mangler'];
     }
-
-    $templateId = $validation['data']['id'];
 
     $template = db_fetch("
         SELECT * FROM report_templates WHERE id = :id
     ", ['id' => $templateId]);
 
     if (!$template) {
-        return api_error('Template ikke fundet');
+        return ['success' => false, 'error' => 'Template ikke fundet'];
     }
 
     return [
@@ -311,15 +292,7 @@ function handle_get_template(array $user): array {
  * GET ?module=report_builder&action=get_templates
  */
 function handle_get_templates(array $user): array {
-    $validation = api_validate_params([
-        'report_type' => ['string', 'GET', false, '']
-    ]);
-
-    if (!$validation['success']) {
-        return $validation;
-    }
-
-    $reportType = $validation['data']['report_type'];
+    $reportType = sanitize_string($_GET['report_type'] ?? '');
 
     $query = "SELECT * FROM report_templates";
     $params = [];
@@ -344,27 +317,31 @@ function handle_get_templates(array $user): array {
  * POST ?module=report_builder&action=delete_template
  */
 function handle_delete_template(array $user): array {
-    $csrfCheck = api_require_csrf();
-    if (!$csrfCheck['success']) return $csrfCheck;
+    csrf_require();
 
-    $validation = api_validate_params([
-        'id' => ['int', 'POST', true]
-    ]);
+    $templateId = sanitize_int($_POST['id'] ?? 0);
 
-    if (!$validation['success']) {
-        return $validation;
+    if (!$templateId) {
+        return ['success' => false, 'error' => 'Template ID mangler'];
     }
 
-    $templateId = $validation['data']['id'];
+    db_begin_transaction();
+    try {
+        db_delete('report_templates', 'id = :id', ['id' => $templateId]);
 
-    return api_crud_delete(
-        'report_templates',
-        $templateId,
-        null,
-        function($id) {
-            log_activity('report_template_deleted', 'report_template', $id);
-        }
-    );
+        db_commit();
+
+        log_activity('report_template_deleted', 'report_template', $templateId);
+
+        return [
+            'success' => true,
+            'message' => 'Template slettet'
+        ];
+
+    } catch (Exception $e) {
+        db_rollback();
+        return ['success' => false, 'error' => 'Kunne ikke slette template'];
+    }
 }
 
 /**
