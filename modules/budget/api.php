@@ -1,6 +1,6 @@
 <?php
 /**
- * Budget Module API
+ * Budget Module API - Refactored with API Helpers
  *
  * Handles budget lines (CAPEX/OPEX/Reinstatement)
  * OPTIMIZED: Uses v_budget_totals view
@@ -15,13 +15,25 @@
  * - calculate_total: Calculate budget total (OPTIMIZED)
  */
 
+require_once __DIR__ . '/../../core/api-helpers.php';
+
 /**
  * Search price catalog
  * GET /api.php?module=budget&action=search_catalog&q=search&category=X
  */
 function handle_search_catalog(array $user): array {
-    $query = sanitize_string($_GET['q'] ?? '');
-    $category = sanitize_string($_GET['category'] ?? '');
+    // Validate parameters
+    $validation = api_validate_params([
+        'q' => ['string', 'GET', false, ''],
+        'category' => ['string', 'GET', false, '']
+    ]);
+
+    if (!$validation['success']) {
+        return api_error($validation['errors']);
+    }
+
+    $query = $validation['data']['q'];
+    $category = $validation['data']['category'];
 
     $where = ['is_active = true'];
     $params = [];
@@ -59,7 +71,16 @@ function handle_search_catalog(array $user): array {
  * GET /api.php?module=budget&action=get_templates&category=X
  */
 function handle_get_templates(array $user): array {
-    $category = sanitize_string($_GET['category'] ?? '');
+    // Validate parameters
+    $validation = api_validate_params([
+        'category' => ['string', 'GET', false, '']
+    ]);
+
+    if (!$validation['success']) {
+        return api_error($validation['errors']);
+    }
+
+    $category = $validation['data']['category'];
 
     $where = ['(is_public = true OR created_by = :user_id)'];
     $params = ['user_id' => $user['id']];
@@ -89,15 +110,26 @@ function handle_get_templates(array $user): array {
  * POST /api.php {module: 'budget', action: 'load_template', template_id: 123, element_id: 456, budget_type: 'capex'}
  */
 function handle_load_template(array $user): array {
-    csrf_require();
-
-    $templateId = sanitize_int($_POST['template_id'] ?? 0);
-    $elementId = sanitize_int($_POST['element_id'] ?? 0);
-    $budgetType = sanitize_string($_POST['budget_type'] ?? 'capex');
-
-    if (!$templateId || !$elementId) {
-        return ['success' => false, 'error' => 'Template ID og Element ID påkrævet'];
+    // Validate CSRF token
+    $csrfCheck = api_require_csrf();
+    if (!$csrfCheck['success']) {
+        return $csrfCheck;
     }
+
+    // Validate parameters
+    $validation = api_validate_params([
+        'template_id' => ['int', 'POST', true],
+        'element_id' => ['int', 'POST', true],
+        'budget_type' => ['string', 'POST', false, 'capex']
+    ]);
+
+    if (!$validation['success']) {
+        return api_error($validation['errors']);
+    }
+
+    $templateId = $validation['data']['template_id'];
+    $elementId = $validation['data']['element_id'];
+    $budgetType = $validation['data']['budget_type'];
 
     // Get template
     $template = db_fetch("
@@ -107,7 +139,7 @@ function handle_load_template(array $user): array {
     ", ['id' => $templateId, 'user_id' => $user['id']]);
 
     if (!$template) {
-        return ['success' => false, 'error' => 'Template ikke fundet'];
+        return api_error('Template ikke fundet');
     }
 
     // Verify element access
@@ -120,57 +152,63 @@ function handle_load_template(array $user): array {
     ", ['id' => $elementId]);
 
     if (!$element) {
-        return ['success' => false, 'error' => 'Element ikke fundet'];
+        return api_error('Element ikke fundet');
     }
 
-    if (!can_access_project($user, $element['project_id'], 'editor')) {
-        return ['success' => false, 'error' => 'Ingen redigerings adgang'];
+    $accessCheck = api_require_project_access($user, $element['project_id'], 'editor');
+    if (!$accessCheck['success']) {
+        return $accessCheck;
     }
 
     // Parse template data
     $templateData = json_decode($template['template_data'], true);
 
     if (!is_array($templateData)) {
-        return ['success' => false, 'error' => 'Ugyldig template data'];
+        return api_error('Ugyldig template data');
     }
 
-    // Get current max line number
-    $maxLine = db_value("
-        SELECT COALESCE(MAX(line_number), -1)
-        FROM budget_lines
-        WHERE element_id = :element_id AND budget_type = :budget_type
-    ", ['element_id' => $elementId, 'budget_type' => $budgetType]);
+    // Use transaction for batch insert
+    return api_transaction(
+        function() use ($elementId, $budgetType, $templateData) {
+            // Get current max line number
+            $maxLine = db_value("
+                SELECT COALESCE(MAX(line_number), -1)
+                FROM budget_lines
+                WHERE element_id = :element_id AND budget_type = :budget_type
+            ", ['element_id' => $elementId, 'budget_type' => $budgetType]);
 
-    // Insert template lines
-    $insertedCount = 0;
-    foreach ($templateData as $index => $line) {
-        $lineNumber = $maxLine + 1 + $index;
+            // Insert template lines
+            $insertedCount = 0;
+            foreach ($templateData as $index => $line) {
+                $lineNumber = $maxLine + 1 + $index;
 
-        db_insert('budget_lines', [
-            'element_id' => $elementId,
-            'budget_type' => $budgetType,
-            'line_number' => $lineNumber,
-            'description' => $line['description'] ?? '',
-            'quantity' => $line['quantity'] ?? 0,
-            'unit' => $line['unit'] ?? 'stk',
-            'price_per_unit' => $line['price_per_unit'] ?? 0,
-            'year_0_1' => $line['year_0_1'] ?? 0,
-            'year_1_2' => $line['year_1_2'] ?? 0,
-            'year_3_5' => $line['year_3_5'] ?? 0,
-            'year_5_10' => $line['year_5_10'] ?? 0,
-            'year_10_plus' => $line['year_10_plus'] ?? 0
-        ]);
+                db_insert('budget_lines', [
+                    'element_id' => $elementId,
+                    'budget_type' => $budgetType,
+                    'line_number' => $lineNumber,
+                    'description' => $line['description'] ?? '',
+                    'quantity' => $line['quantity'] ?? 0,
+                    'unit' => $line['unit'] ?? 'stk',
+                    'price_per_unit' => $line['price_per_unit'] ?? 0,
+                    'year_0_1' => $line['year_0_1'] ?? 0,
+                    'year_1_2' => $line['year_1_2'] ?? 0,
+                    'year_3_5' => $line['year_3_5'] ?? 0,
+                    'year_5_10' => $line['year_5_10'] ?? 0,
+                    'year_10_plus' => $line['year_10_plus'] ?? 0
+                ]);
 
-        $insertedCount++;
-    }
+                $insertedCount++;
+            }
 
-    log_activity('budget_template_loaded', 'building_element', $elementId);
+            log_activity('budget_template_loaded', 'building_element', $elementId);
 
-    return [
-        'success' => true,
-        'message' => "$insertedCount linjer indlæst",
-        'inserted_count' => $insertedCount
-    ];
+            return ['inserted_count' => $insertedCount];
+        },
+        function($result) {
+            return "{$result['inserted_count']} linjer indlæst";
+        },
+        'Kunne ikke indlæse template'
+    );
 }
 
 /**
@@ -178,12 +216,18 @@ function handle_load_template(array $user): array {
  * GET /api.php?module=budget&action=get_lines&element_id=123&budget_type=capex
  */
 function handle_get_lines(array $user): array {
-    $elementId = sanitize_int($_GET['element_id'] ?? 0);
-    $budgetType = sanitize_string($_GET['budget_type'] ?? 'capex');
+    // Validate parameters
+    $validation = api_validate_params([
+        'element_id' => ['int', 'GET', true],
+        'budget_type' => ['string', 'GET', false, 'capex']
+    ]);
 
-    if (!$elementId) {
-        return ['success' => false, 'error' => 'Element ID mangler'];
+    if (!$validation['success']) {
+        return api_error($validation['errors']);
     }
+
+    $elementId = $validation['data']['element_id'];
+    $budgetType = $validation['data']['budget_type'];
 
     // Verify access
     $element = db_fetch("
@@ -195,11 +239,12 @@ function handle_get_lines(array $user): array {
     ", ['id' => $elementId]);
 
     if (!$element) {
-        return ['success' => false, 'error' => 'Element ikke fundet'];
+        return api_error('Element ikke fundet');
     }
 
-    if (!can_access_project($user, $element['project_id'], 'viewer')) {
-        return ['success' => false, 'error' => 'Ingen adgang'];
+    $accessCheck = api_require_project_access($user, $element['project_id'], 'viewer');
+    if (!$accessCheck['success']) {
+        return $accessCheck;
     }
 
     // Get budget lines
@@ -222,18 +267,28 @@ function handle_get_lines(array $user): array {
  * POST /api.php {module: 'budget', action: 'save_lines', element_id: 123, budget_type: 'capex', lines: [...]}
  */
 function handle_save_lines(array $user): array {
-    csrf_require();
-
-    $elementId = sanitize_int($_POST['element_id'] ?? 0);
-    $budgetType = sanitize_string($_POST['budget_type'] ?? 'capex');
-    $lines = json_decode($_POST['lines'] ?? '[]', true);
-
-    if (!$elementId) {
-        return ['success' => false, 'error' => 'Element ID mangler'];
+    // Validate CSRF token
+    $csrfCheck = api_require_csrf();
+    if (!$csrfCheck['success']) {
+        return $csrfCheck;
     }
 
+    // Validate parameters
+    $validation = api_validate_params([
+        'element_id' => ['int', 'POST', true],
+        'budget_type' => ['string', 'POST', false, 'capex']
+    ]);
+
+    if (!$validation['success']) {
+        return api_error($validation['errors']);
+    }
+
+    $elementId = $validation['data']['element_id'];
+    $budgetType = $validation['data']['budget_type'];
+    $lines = json_decode($_POST['lines'] ?? '[]', true);
+
     if (!is_array($lines)) {
-        return ['success' => false, 'error' => 'Ugyldige linjedata'];
+        return api_error('Ugyldige linjedata');
     }
 
     // Verify access
@@ -246,70 +301,67 @@ function handle_save_lines(array $user): array {
     ", ['id' => $elementId]);
 
     if (!$element) {
-        return ['success' => false, 'error' => 'Element ikke fundet'];
+        return api_error('Element ikke fundet');
     }
 
-    if (!can_access_project($user, $element['project_id'], 'editor')) {
-        return ['success' => false, 'error' => 'Ingen redigerings adgang'];
+    $accessCheck = api_require_project_access($user, $element['project_id'], 'editor');
+    if (!$accessCheck['success']) {
+        return $accessCheck;
     }
 
-    db_begin_transaction();
-    try {
-        foreach ($lines as $index => $line) {
-            $lineData = [
-                'element_id' => $elementId,
-                'budget_type' => $budgetType,
-                'line_number' => $index,
-                'description' => sanitize_string($line['description'] ?? ''),
-                'quantity' => sanitize_float($line['quantity'] ?? 0),
-                'unit' => sanitize_string($line['unit'] ?? 'stk'),
-                'price_per_unit' => sanitize_float($line['price_per_unit'] ?? 0),
-                'year_0_1' => sanitize_float($line['year_0_1'] ?? 0),
-                'year_1_2' => sanitize_float($line['year_1_2'] ?? 0),
-                'year_3_5' => sanitize_float($line['year_3_5'] ?? 0),
-                'year_5_10' => sanitize_float($line['year_5_10'] ?? 0),
-                'year_10_plus' => sanitize_float($line['year_10_plus'] ?? 0),
-                'price_catalog_id' => !empty($line['price_catalog_id']) ? sanitize_int($line['price_catalog_id']) : null,
-                'notes' => sanitize_string($line['notes'] ?? '')
-            ];
+    // Use transaction for batch save
+    return api_transaction(
+        function() use ($elementId, $budgetType, $lines) {
+            foreach ($lines as $index => $line) {
+                $lineData = [
+                    'element_id' => $elementId,
+                    'budget_type' => $budgetType,
+                    'line_number' => $index,
+                    'description' => sanitize_string($line['description'] ?? ''),
+                    'quantity' => sanitize_float($line['quantity'] ?? 0),
+                    'unit' => sanitize_string($line['unit'] ?? 'stk'),
+                    'price_per_unit' => sanitize_float($line['price_per_unit'] ?? 0),
+                    'year_0_1' => sanitize_float($line['year_0_1'] ?? 0),
+                    'year_1_2' => sanitize_float($line['year_1_2'] ?? 0),
+                    'year_3_5' => sanitize_float($line['year_3_5'] ?? 0),
+                    'year_5_10' => sanitize_float($line['year_5_10'] ?? 0),
+                    'year_10_plus' => sanitize_float($line['year_10_plus'] ?? 0),
+                    'price_catalog_id' => !empty($line['price_catalog_id']) ? sanitize_int($line['price_catalog_id']) : null,
+                    'notes' => sanitize_string($line['notes'] ?? '')
+                ];
 
-            if (!empty($line['id'])) {
-                // Update existing line
-                $id = sanitize_int($line['id']);
-                db_update('budget_lines', $lineData, 'id = :id AND element_id = :element_id', [
-                    'id' => $id,
-                    'element_id' => $elementId
-                ]);
-            } else {
-                // Insert new line
-                db_insert('budget_lines', $lineData);
-            }
-        }
-
-        // Update element's CAPEX if budget type is capex
-        if ($budgetType === 'capex') {
-            $total = 0;
-            foreach ($lines as $line) {
-                $qty = (float)($line['quantity'] ?? 0);
-                $price = (float)($line['price_per_unit'] ?? 0);
-                $total += $qty * $price;
+                if (!empty($line['id'])) {
+                    // Update existing line
+                    $id = sanitize_int($line['id']);
+                    db_update('budget_lines', $lineData, 'id = :id AND element_id = :element_id', [
+                        'id' => $id,
+                        'element_id' => $elementId
+                    ]);
+                } else {
+                    // Insert new line
+                    db_insert('budget_lines', $lineData);
+                }
             }
 
-            db_update('building_elements', ['capex' => $total], 'id = :id', ['id' => $elementId]);
-        }
+            // Update element's CAPEX if budget type is capex
+            if ($budgetType === 'capex') {
+                $total = 0;
+                foreach ($lines as $line) {
+                    $qty = (float)($line['quantity'] ?? 0);
+                    $price = (float)($line['price_per_unit'] ?? 0);
+                    $total += $qty * $price;
+                }
 
-        db_commit();
-        log_activity('budget_lines_saved', 'building_element', $elementId);
+                db_update('building_elements', ['capex' => $total], 'id = :id', ['id' => $elementId]);
+            }
 
-        return [
-            'success' => true,
-            'message' => 'Budget linjer gemt'
-        ];
-    } catch (Exception $e) {
-        db_rollback();
-        log_error('Budget save error: ' . $e->getMessage());
-        return ['success' => false, 'error' => 'Kunne ikke gemme budget'];
-    }
+            log_activity('budget_lines_saved', 'building_element', $elementId);
+
+            return ['lines_saved' => count($lines)];
+        },
+        'Budget linjer gemt',
+        'Kunne ikke gemme budget'
+    );
 }
 
 /**
@@ -317,40 +369,49 @@ function handle_save_lines(array $user): array {
  * POST /api.php {module: 'budget', action: 'delete_line', id: 123}
  */
 function handle_delete_line(array $user): array {
-    csrf_require();
-
-    $lineId = sanitize_int($_POST['id'] ?? 0);
-
-    if (!$lineId) {
-        return ['success' => false, 'error' => 'Line ID mangler'];
+    // Validate CSRF token
+    $csrfCheck = api_require_csrf();
+    if (!$csrfCheck['success']) {
+        return $csrfCheck;
     }
 
-    // Get line and verify access
-    $line = db_fetch("
-        SELECT bl.*, p.id as project_id
-        FROM budget_lines bl
-        JOIN building_elements be ON bl.element_id = be.id
-        JOIN buildings b ON be.building_id = b.id
-        JOIN projects p ON b.project_id = p.id
-        WHERE bl.id = :id
-    ", ['id' => $lineId]);
+    // Validate parameters
+    $validation = api_validate_params([
+        'id' => ['int', 'POST', true]
+    ]);
 
-    if (!$line) {
-        return ['success' => false, 'error' => 'Linje ikke fundet'];
+    if (!$validation['success']) {
+        return api_error($validation['errors']);
     }
 
-    if (!can_access_project($user, $line['project_id'], 'editor')) {
-        return ['success' => false, 'error' => 'Ingen redigerings adgang'];
-    }
+    $lineId = $validation['data']['id'];
 
-    db_delete('budget_lines', 'id = :id', ['id' => $lineId]);
+    // Use api_crud_delete with project access check
+    return api_crud_delete(
+        'budget_lines',
+        $lineId,
+        function($line) use ($user) {
+            // Get project_id via joins
+            $fullLine = db_fetch("
+                SELECT p.id as project_id
+                FROM budget_lines bl
+                JOIN building_elements be ON bl.element_id = be.id
+                JOIN buildings b ON be.building_id = b.id
+                JOIN projects p ON b.project_id = p.id
+                WHERE bl.id = :id
+            ", ['id' => $line['id']]);
 
-    log_activity('budget_line_deleted', 'budget_line', $lineId);
-
-    return [
-        'success' => true,
-        'message' => 'Linje slettet'
-    ];
+            return $fullLine && can_access_project($user, $fullLine['project_id'], 'editor');
+        },
+        null, // No before delete callback
+        function($lineId) {
+            log_activity('budget_line_deleted', 'budget_line', $lineId);
+        },
+        'Linje slettet',
+        'Kunne ikke slette linje',
+        'Linje ikke fundet',
+        'Ingen redigerings adgang'
+    );
 }
 
 /**
@@ -360,12 +421,18 @@ function handle_delete_line(array $user): array {
  * GET /api.php?module=budget&action=calculate_total&element_id=123&budget_type=capex
  */
 function handle_calculate_total(array $user): array {
-    $elementId = sanitize_int($_GET['element_id'] ?? 0);
-    $budgetType = sanitize_string($_GET['budget_type'] ?? 'capex');
+    // Validate parameters
+    $validation = api_validate_params([
+        'element_id' => ['int', 'GET', true],
+        'budget_type' => ['string', 'GET', false, 'capex']
+    ]);
 
-    if (!$elementId) {
-        return ['success' => false, 'error' => 'Element ID mangler'];
+    if (!$validation['success']) {
+        return api_error($validation['errors']);
     }
+
+    $elementId = $validation['data']['element_id'];
+    $budgetType = $validation['data']['budget_type'];
 
     // Verify access
     $element = db_fetch("
@@ -377,11 +444,12 @@ function handle_calculate_total(array $user): array {
     ", ['id' => $elementId]);
 
     if (!$element) {
-        return ['success' => false, 'error' => 'Element ikke fundet'];
+        return api_error('Element ikke fundet');
     }
 
-    if (!can_access_project($user, $element['project_id'], 'viewer')) {
-        return ['success' => false, 'error' => 'Ingen adgang'];
+    $accessCheck = api_require_project_access($user, $element['project_id'], 'viewer');
+    if (!$accessCheck['success']) {
+        return $accessCheck;
     }
 
     // OPTIMIZED: Use v_budget_totals view
