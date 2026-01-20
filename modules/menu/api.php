@@ -1,6 +1,6 @@
 <?php
 /**
- * Menu Module API
+ * Menu Module API - Refactored with API Helpers
  *
  * Handles navigation menu management with drag-and-drop sorting
  *
@@ -15,6 +15,7 @@
  */
 
 require_once __DIR__ . '/../../core/permissions.php';
+require_once __DIR__ . '/../../core/api-helpers.php';
 
 /**
  * Get full menu structure
@@ -77,55 +78,52 @@ function handle_get_user_menu(array $user): array {
  * POST ?module=menu&action=create_item
  */
 function handle_create_item(array $user): array {
-    csrf_require();
-
-    $label = sanitize_string($_POST['label'] ?? '');
-    $url = sanitize_string($_POST['url'] ?? '');
-    $icon = sanitize_string($_POST['icon'] ?? '');
-    $parentId = isset($_POST['parent_id']) ? sanitize_int($_POST['parent_id']) : null;
-
-    if (!$label) {
-        return ['success' => false, 'error' => 'Label er påkrævet'];
+    // Validate CSRF token
+    $csrfCheck = api_require_csrf();
+    if (!$csrfCheck['success']) {
+        return $csrfCheck;
     }
 
-    db_begin_transaction();
-    try {
-        // Get next display order
-        $maxOrder = db_value("
-            SELECT COALESCE(MAX(display_order), 0)
-            FROM menu_items
-            WHERE parent_id " . ($parentId ? "= :parent_id" : "IS NULL"),
-            $parentId ? ['parent_id' => $parentId] : []
-        );
+    // Validate parameters
+    $validation = api_validate_params([
+        'label' => ['string', 'POST', true],
+        'url' => ['string', 'POST', false, ''],
+        'icon' => ['string', 'POST', false, ''],
+        'parent_id' => ['int', 'POST', false, null],
+        'required_module' => ['string', 'POST', false, ''],
+        'required_permission' => ['string', 'POST', false, '']
+    ]);
 
-        $itemData = [
-            'parent_id' => $parentId,
-            'label' => $label,
-            'url' => $url,
-            'icon' => $icon,
-            'required_module' => sanitize_string($_POST['required_module'] ?? ''),
-            'required_permission' => sanitize_string($_POST['required_permission'] ?? ''),
-            'display_order' => $maxOrder + 1,
-            'is_active' => true,
-            'created_at' => date('Y-m-d H:i:s')
-        ];
-
-        $itemId = db_insert('menu_items', $itemData);
-
-        db_commit();
-
-        log_activity('menu_item_created', 'menu_item', $itemId);
-
-        return [
-            'success' => true,
-            'item_id' => $itemId,
-            'message' => 'Menu punkt oprettet'
-        ];
-
-    } catch (Exception $e) {
-        db_rollback();
-        return ['success' => false, 'error' => 'Kunne ikke oprette menu punkt'];
+    if (!$validation['success']) {
+        return api_error($validation['errors']);
     }
+
+    $data = $validation['data'];
+    $parentId = $data['parent_id'];
+
+    // Use api_crud_create with display_order logic
+    return api_crud_create(
+        'menu_items',
+        $data,
+        function(&$itemData) use ($parentId) {
+            // Get next display order
+            $maxOrder = db_value("
+                SELECT COALESCE(MAX(display_order), 0)
+                FROM menu_items
+                WHERE parent_id " . ($parentId ? "= :parent_id" : "IS NULL"),
+                $parentId ? ['parent_id' => $parentId] : []
+            );
+
+            $itemData['display_order'] = $maxOrder + 1;
+            $itemData['is_active'] = true;
+            $itemData['created_at'] = date('Y-m-d H:i:s');
+        },
+        function($itemId) {
+            log_activity('menu_item_created', 'menu_item', $itemId);
+        },
+        'Menu punkt oprettet',
+        'Kunne ikke oprette menu punkt'
+    );
 }
 
 /**
@@ -133,59 +131,65 @@ function handle_create_item(array $user): array {
  * POST ?module=menu&action=update_item
  */
 function handle_update_item(array $user): array {
-    csrf_require();
-
-    $itemId = sanitize_int($_POST['id'] ?? 0);
-
-    if (!$itemId) {
-        return ['success' => false, 'error' => 'Menu ID mangler'];
+    // Validate CSRF token
+    $csrfCheck = api_require_csrf();
+    if (!$csrfCheck['success']) {
+        return $csrfCheck;
     }
 
-    db_begin_transaction();
-    try {
-        $updateData = [];
+    // Validate ID
+    $validation = api_validate_params([
+        'id' => ['int', 'POST', true]
+    ]);
 
-        if (isset($_POST['label'])) {
-            $updateData['label'] = sanitize_string($_POST['label']);
-        }
-
-        if (isset($_POST['url'])) {
-            $updateData['url'] = sanitize_string($_POST['url']);
-        }
-
-        if (isset($_POST['icon'])) {
-            $updateData['icon'] = sanitize_string($_POST['icon']);
-        }
-
-        if (isset($_POST['required_module'])) {
-            $updateData['required_module'] = sanitize_string($_POST['required_module']);
-        }
-
-        if (isset($_POST['required_permission'])) {
-            $updateData['required_permission'] = sanitize_string($_POST['required_permission']);
-        }
-
-        if (isset($_POST['is_active'])) {
-            $updateData['is_active'] = (bool)$_POST['is_active'];
-        }
-
-        if (!empty($updateData)) {
-            db_update('menu_items', $updateData, 'id = :id', ['id' => $itemId]);
-        }
-
-        db_commit();
-
-        log_activity('menu_item_updated', 'menu_item', $itemId);
-
-        return [
-            'success' => true,
-            'message' => 'Menu punkt opdateret'
-        ];
-
-    } catch (Exception $e) {
-        db_rollback();
-        return ['success' => false, 'error' => 'Kunne ikke opdatere menu punkt'];
+    if (!$validation['success']) {
+        return api_error($validation['errors']);
     }
+
+    $itemId = $validation['data']['id'];
+
+    // Validate update fields (all optional)
+    $updateValidation = api_validate_params([
+        'label' => ['string', 'POST', false],
+        'url' => ['string', 'POST', false],
+        'icon' => ['string', 'POST', false],
+        'required_module' => ['string', 'POST', false],
+        'required_permission' => ['string', 'POST', false]
+    ]);
+
+    if (!$updateValidation['success']) {
+        return api_error($updateValidation['errors']);
+    }
+
+    // Filter out null values
+    $updateData = array_filter(
+        $updateValidation['data'],
+        fn($value) => $value !== null
+    );
+
+    // Handle is_active separately (boolean)
+    if (isset($_POST['is_active'])) {
+        $updateData['is_active'] = (bool)$_POST['is_active'];
+    }
+
+    if (empty($updateData)) {
+        return api_error('Ingen felter at opdatere');
+    }
+
+    // Use api_crud_update
+    return api_crud_update(
+        'menu_items',
+        $itemId,
+        $updateData,
+        null, // No permission check needed
+        function($itemId) {
+            log_activity('menu_item_updated', 'menu_item', $itemId);
+        },
+        'Menu punkt opdateret',
+        'Kunne ikke opdatere menu punkt',
+        'Menu punkt ikke fundet',
+        'Ingen adgang til at redigere menu punkt'
+    );
 }
 
 /**
@@ -193,43 +197,46 @@ function handle_update_item(array $user): array {
  * POST ?module=menu&action=delete_item
  */
 function handle_delete_item(array $user): array {
-    csrf_require();
-
-    $itemId = sanitize_int($_POST['id'] ?? 0);
-
-    if (!$itemId) {
-        return ['success' => false, 'error' => 'Menu ID mangler'];
+    // Validate CSRF token
+    $csrfCheck = api_require_csrf();
+    if (!$csrfCheck['success']) {
+        return $csrfCheck;
     }
 
-    // Check if has children
-    $childCount = db_value("
-        SELECT COUNT(*) FROM menu_items WHERE parent_id = :id
-    ", ['id' => $itemId]);
+    // Validate ID
+    $validation = api_validate_params([
+        'id' => ['int', 'POST', true]
+    ]);
 
-    if ($childCount > 0) {
-        return [
-            'success' => false,
-            'error' => 'Kan ikke slette menu punkt med underpunkter'
-        ];
+    if (!$validation['success']) {
+        return api_error($validation['errors']);
     }
 
-    db_begin_transaction();
-    try {
-        db_delete('menu_items', 'id = :id', ['id' => $itemId]);
+    $itemId = $validation['data']['id'];
 
-        db_commit();
+    // Use api_crud_delete with child check
+    return api_crud_delete(
+        'menu_items',
+        $itemId,
+        null, // No permission check
+        function($itemId) {
+            // Check if has children
+            $childCount = db_value("
+                SELECT COUNT(*) FROM menu_items WHERE parent_id = :id
+            ", ['id' => $itemId]);
 
-        log_activity('menu_item_deleted', 'menu_item', $itemId);
-
-        return [
-            'success' => true,
-            'message' => 'Menu punkt slettet'
-        ];
-
-    } catch (Exception $e) {
-        db_rollback();
-        return ['success' => false, 'error' => 'Kunne ikke slette menu punkt'];
-    }
+            if ($childCount > 0) {
+                throw new Exception('Kan ikke slette menu punkt med underpunkter');
+            }
+        },
+        function($itemId) {
+            log_activity('menu_item_deleted', 'menu_item', $itemId);
+        },
+        'Menu punkt slettet',
+        'Kunne ikke slette menu punkt',
+        'Menu punkt ikke fundet',
+        'Ingen adgang til at slette menu punkt'
+    );
 }
 
 /**
@@ -237,45 +244,53 @@ function handle_delete_item(array $user): array {
  * POST ?module=menu&action=reorder
  */
 function handle_reorder(array $user): array {
-    csrf_require();
-
-    $itemIds = $_POST['item_ids'] ?? [];
-    $parentId = isset($_POST['parent_id']) ? sanitize_int($_POST['parent_id']) : null;
-
-    if (!is_array($itemIds)) {
-        return ['success' => false, 'error' => 'Menu ID liste er påkrævet'];
+    // Validate CSRF token
+    $csrfCheck = api_require_csrf();
+    if (!$csrfCheck['success']) {
+        return $csrfCheck;
     }
 
-    db_begin_transaction();
-    try {
-        foreach ($itemIds as $order => $itemId) {
-            $itemId = sanitize_int($itemId);
-            $whereClause = 'id = :id AND parent_id ' . ($parentId ? '= :parent_id' : 'IS NULL');
-            $params = ['id' => $itemId];
-            if ($parentId) {
-                $params['parent_id'] = $parentId;
+    // Validate parameters
+    $validation = api_validate_params([
+        'parent_id' => ['int', 'POST', false, null]
+    ]);
+
+    if (!$validation['success']) {
+        return api_error($validation['errors']);
+    }
+
+    $parentId = $validation['data']['parent_id'];
+    $itemIds = $_POST['item_ids'] ?? [];
+
+    if (!is_array($itemIds) || empty($itemIds)) {
+        return api_error('Menu ID liste er påkrævet');
+    }
+
+    // Use api_transaction for reordering
+    return api_transaction(
+        function() use ($itemIds, $parentId) {
+            foreach ($itemIds as $order => $itemId) {
+                $itemId = sanitize_int($itemId);
+                $whereClause = 'id = :id AND parent_id ' . ($parentId ? '= :parent_id' : 'IS NULL');
+                $params = ['id' => $itemId];
+                if ($parentId) {
+                    $params['parent_id'] = $parentId;
+                }
+
+                db_update('menu_items',
+                    ['display_order' => $order + 1],
+                    $whereClause,
+                    $params
+                );
             }
 
-            db_update('menu_items',
-                ['display_order' => $order + 1],
-                $whereClause,
-                $params
-            );
-        }
+            log_activity('menu_items_reordered', 'system', 0);
 
-        db_commit();
-
-        log_activity('menu_items_reordered', 'system', 0);
-
-        return [
-            'success' => true,
-            'message' => 'Menu rækkefølge opdateret'
-        ];
-
-    } catch (Exception $e) {
-        db_rollback();
-        return ['success' => false, 'error' => 'Kunne ikke opdatere rækkefølge'];
-    }
+            return ['reordered_count' => count($itemIds)];
+        },
+        'Menu rækkefølge opdateret',
+        'Kunne ikke opdatere rækkefølge'
+    );
 }
 
 /**
@@ -283,57 +298,62 @@ function handle_reorder(array $user): array {
  * POST ?module=menu&action=move_item
  */
 function handle_move_item(array $user): array {
-    csrf_require();
-
-    $itemId = sanitize_int($_POST['id'] ?? 0);
-    $newParentId = isset($_POST['new_parent_id']) ? sanitize_int($_POST['new_parent_id']) : null;
-
-    if (!$itemId) {
-        return ['success' => false, 'error' => 'Menu ID mangler'];
+    // Validate CSRF token
+    $csrfCheck = api_require_csrf();
+    if (!$csrfCheck['success']) {
+        return $csrfCheck;
     }
+
+    // Validate parameters
+    $validation = api_validate_params([
+        'id' => ['int', 'POST', true],
+        'new_parent_id' => ['int', 'POST', false, null]
+    ]);
+
+    if (!$validation['success']) {
+        return api_error($validation['errors']);
+    }
+
+    $itemId = $validation['data']['id'];
+    $newParentId = $validation['data']['new_parent_id'];
 
     // Prevent moving to self
     if ($newParentId === $itemId) {
-        return ['success' => false, 'error' => 'Menu punkt kan ikke flyttes til sig selv'];
+        return api_error('Menu punkt kan ikke flyttes til sig selv');
     }
 
-    // Check for circular reference (is new parent a descendant?)
+    // Check for circular reference
     if ($newParentId !== null && is_menu_descendant($newParentId, $itemId)) {
-        return ['success' => false, 'error' => 'Menu punkt kan ikke flyttes til et af sine underpunkter'];
+        return api_error('Menu punkt kan ikke flyttes til et af sine underpunkter');
     }
 
-    db_begin_transaction();
-    try {
-        // Get next display order in new location
-        $maxOrder = db_value("
-            SELECT COALESCE(MAX(display_order), 0)
-            FROM menu_items
-            WHERE parent_id " . ($newParentId ? "= :parent_id" : "IS NULL"),
-            $newParentId ? ['parent_id' => $newParentId] : []
-        );
+    // Use api_transaction for move operation
+    return api_transaction(
+        function() use ($itemId, $newParentId) {
+            // Get next display order in new location
+            $maxOrder = db_value("
+                SELECT COALESCE(MAX(display_order), 0)
+                FROM menu_items
+                WHERE parent_id " . ($newParentId ? "= :parent_id" : "IS NULL"),
+                $newParentId ? ['parent_id' => $newParentId] : []
+            );
 
-        db_update('menu_items',
-            [
-                'parent_id' => $newParentId,
-                'display_order' => $maxOrder + 1
-            ],
-            'id = :id',
-            ['id' => $itemId]
-        );
+            db_update('menu_items',
+                [
+                    'parent_id' => $newParentId,
+                    'display_order' => $maxOrder + 1
+                ],
+                'id = :id',
+                ['id' => $itemId]
+            );
 
-        db_commit();
+            log_activity('menu_item_moved', 'menu_item', $itemId);
 
-        log_activity('menu_item_moved', 'menu_item', $itemId);
-
-        return [
-            'success' => true,
-            'message' => 'Menu punkt flyttet'
-        ];
-
-    } catch (Exception $e) {
-        db_rollback();
-        return ['success' => false, 'error' => 'Kunne ikke flytte menu punkt'];
-    }
+            return ['item_id' => $itemId];
+        },
+        'Menu punkt flyttet',
+        'Kunne ikke flytte menu punkt'
+    );
 }
 
 /**
