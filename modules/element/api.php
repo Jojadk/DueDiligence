@@ -1,6 +1,6 @@
 <?php
 /**
- * Element Module API
+ * Element Module API - Refactored with API Helpers
  *
  * Handles building element CRUD operations and hierarchy management
  *
@@ -17,29 +17,37 @@
  */
 
 require_once __DIR__ . '/../../core/permissions.php';
+require_once __DIR__ . '/../../core/api-helpers.php';
 
 /**
  * Get list of elements for a building
  * GET ?module=element&action=get_list&building_id=X
  */
 function handle_get_list(array $user): array {
-    $buildingId = sanitize_int($_GET['building_id'] ?? 0);
-    $parentId = isset($_GET['parent_id']) ? sanitize_int($_GET['parent_id']) : null;
+    // Validate parameters
+    $validation = api_validate_params([
+        'building_id' => ['int', 'GET', true],
+        'parent_id' => ['int', 'GET', false, null]
+    ]);
 
-    if (!$buildingId) {
-        return ['success' => false, 'error' => 'Bygnings ID mangler'];
+    if (!$validation['success']) {
+        return api_error($validation['errors']);
     }
+
+    $buildingId = $validation['data']['building_id'];
+    $parentId = $validation['data']['parent_id'];
 
     // Get building to check project access
     $building = db_fetch("SELECT project_id FROM buildings WHERE id = :id", ['id' => $buildingId]);
 
     if (!$building) {
-        return ['success' => false, 'error' => 'Bygning ikke fundet'];
+        return api_error('Bygning ikke fundet');
     }
 
     // Check project access
-    if (!can_access_project($user, $building['project_id'], 'viewer')) {
-        return ['success' => false, 'error' => 'Ingen adgang til bygningen'];
+    $accessCheck = api_require_project_access($user, $building['project_id'], 'viewer');
+    if (!$accessCheck['success']) {
+        return $accessCheck;
     }
 
     // Get elements with pre-calculated stats from view
@@ -94,13 +102,18 @@ function handle_get_list(array $user): array {
  * OPTIMIZED: Uses aggregate stats function for descendants
  */
 function handle_get_details(array $user): array {
-    $elementId = sanitize_int($_GET['id'] ?? 0);
+    // Validate parameters
+    $validation = api_validate_params([
+        'id' => ['int', 'GET', true]
+    ]);
 
-    if (!$elementId) {
-        return ['success' => false, 'error' => 'Element ID mangler'];
+    if (!$validation['success']) {
+        return api_error($validation['errors']);
     }
 
-    // Get element with all details
+    $elementId = $validation['data']['id'];
+
+    // Get element with all details and check project access
     $element = db_fetch("
         SELECT be.*, b.project_id, b.name as building_name,
                es.red_flag_score, es.severity, es.is_critical_urgency,
@@ -112,12 +125,13 @@ function handle_get_details(array $user): array {
     ", ['id' => $elementId]);
 
     if (!$element) {
-        return ['success' => false, 'error' => 'Element ikke fundet'];
+        return api_error('Element ikke fundet');
     }
 
     // Check project access
-    if (!can_access_project($user, $element['project_id'], 'viewer')) {
-        return ['success' => false, 'error' => 'Ingen adgang til elementet'];
+    $accessCheck = api_require_project_access($user, $element['project_id'], 'viewer');
+    if (!$accessCheck['success']) {
+        return $accessCheck;
     }
 
     // Get budget totals for all types
@@ -177,73 +191,71 @@ function handle_get_details(array $user): array {
  * POST ?module=element&action=create
  */
 function handle_create(array $user): array {
-    csrf_require();
-
-    $buildingId = sanitize_int($_POST['building_id'] ?? 0);
-    $name = sanitize_string($_POST['name'] ?? '');
-    $elementCode = sanitize_string($_POST['element_code'] ?? '');
-    $levelCode = sanitize_string($_POST['level_code'] ?? '');
-    $parentId = isset($_POST['parent_id']) ? sanitize_int($_POST['parent_id']) : null;
-
-    if (!$buildingId || !$name) {
-        return ['success' => false, 'error' => 'Bygnings ID og navn er påkrævet'];
+    // Validate CSRF token
+    $csrfCheck = api_require_csrf();
+    if (!$csrfCheck['success']) {
+        return $csrfCheck;
     }
+
+    // Validate parameters
+    $validation = api_validate_params([
+        'building_id' => ['int', 'POST', true],
+        'name' => ['string', 'POST', true],
+        'element_code' => ['string', 'POST', false, ''],
+        'level_code' => ['string', 'POST', false, ''],
+        'parent_id' => ['int', 'POST', false, null],
+        'description' => ['string', 'POST', false, ''],
+        'quantity' => ['float', 'POST', false, 1],
+        'unit' => ['string', 'POST', false, 'stk'],
+        'capex' => ['float', 'POST', false, 0],
+        'urgency' => ['int', 'POST', false, 3],
+        'condition_score' => ['int', 'POST', false, 3]
+    ]);
+
+    if (!$validation['success']) {
+        return api_error($validation['errors']);
+    }
+
+    $data = $validation['data'];
+    $buildingId = $data['building_id'];
+    $parentId = $data['parent_id'];
 
     // Get building to check project access
     $building = db_fetch("SELECT project_id FROM buildings WHERE id = :id", ['id' => $buildingId]);
 
     if (!$building) {
-        return ['success' => false, 'error' => 'Bygning ikke fundet'];
+        return api_error('Bygning ikke fundet');
     }
 
     // Check project access (editor required)
-    if (!can_access_project($user, $building['project_id'], 'editor')) {
-        return ['success' => false, 'error' => 'Ingen adgang til at oprette elementer'];
+    $accessCheck = api_require_project_access($user, $building['project_id'], 'editor');
+    if (!$accessCheck['success']) {
+        return $accessCheck;
     }
 
-    db_begin_transaction();
-    try {
-        // Get next display order
-        $maxOrder = db_value("
-            SELECT COALESCE(MAX(display_order), 0)
-            FROM building_elements
-            WHERE building_id = :building_id AND parent_id " . ($parentId ? "= :parent_id" : "IS NULL"),
-            $parentId ? ['building_id' => $buildingId, 'parent_id' => $parentId] : ['building_id' => $buildingId]
-        );
+    // Use api_crud_create with custom logic for display_order
+    return api_crud_create(
+        'building_elements',
+        $data,
+        function(&$elementData) use ($buildingId, $parentId) {
+            // Get next display order
+            $maxOrder = db_value("
+                SELECT COALESCE(MAX(display_order), 0)
+                FROM building_elements
+                WHERE building_id = :building_id AND parent_id " . ($parentId ? "= :parent_id" : "IS NULL"),
+                $parentId ? ['building_id' => $buildingId, 'parent_id' => $parentId] : ['building_id' => $buildingId]
+            );
 
-        $elementData = [
-            'building_id' => $buildingId,
-            'parent_id' => $parentId,
-            'name' => $name,
-            'element_code' => $elementCode,
-            'level_code' => $levelCode,
-            'description' => sanitize_string($_POST['description'] ?? ''),
-            'quantity' => sanitize_float($_POST['quantity'] ?? 1),
-            'unit' => sanitize_string($_POST['unit'] ?? 'stk'),
-            'capex' => sanitize_float($_POST['capex'] ?? 0),
-            'urgency' => sanitize_int($_POST['urgency'] ?? 3),
-            'condition_score' => sanitize_int($_POST['condition_score'] ?? 3),
-            'display_order' => $maxOrder + 1,
-            'created_at' => date('Y-m-d H:i:s'),
-            'updated_at' => date('Y-m-d H:i:s')
-        ];
-
-        $elementId = db_insert('building_elements', $elementData);
-
-        db_commit();
-
-        log_activity('element_created', 'element', $elementId);
-
-        return [
-            'success' => true,
-            'element_id' => $elementId,
-            'message' => 'Element oprettet succesfuldt'
-        ];
-
-    } catch (Exception $e) {
-        db_rollback();
-        return ['success' => false, 'error' => 'Kunne ikke oprette element'];
-    }
+            $elementData['display_order'] = $maxOrder + 1;
+            $elementData['created_at'] = date('Y-m-d H:i:s');
+            $elementData['updated_at'] = date('Y-m-d H:i:s');
+        },
+        function($elementId) {
+            log_activity('element_created', 'element', $elementId);
+        },
+        'Element oprettet succesfuldt',
+        'Kunne ikke oprette element'
+    );
 }
 
 /**
@@ -251,79 +263,68 @@ function handle_create(array $user): array {
  * POST ?module=element&action=update
  */
 function handle_update(array $user): array {
-    csrf_require();
-
-    $elementId = sanitize_int($_POST['id'] ?? 0);
-
-    if (!$elementId) {
-        return ['success' => false, 'error' => 'Element ID mangler'];
+    // Validate CSRF token
+    $csrfCheck = api_require_csrf();
+    if (!$csrfCheck['success']) {
+        return $csrfCheck;
     }
 
-    // Get element to check project access
-    $element = db_fetch("
-        SELECT be.*, b.project_id
-        FROM building_elements be
-        JOIN buildings b ON b.id = be.building_id
-        WHERE be.id = :id
-    ", ['id' => $elementId]);
+    // Validate ID
+    $validation = api_validate_params([
+        'id' => ['int', 'POST', true]
+    ]);
 
-    if (!$element) {
-        return ['success' => false, 'error' => 'Element ikke fundet'];
+    if (!$validation['success']) {
+        return api_error($validation['errors']);
     }
 
-    // Check project access (editor required)
-    if (!can_access_project($user, $element['project_id'], 'editor')) {
-        return ['success' => false, 'error' => 'Ingen adgang til at redigere element'];
+    $elementId = $validation['data']['id'];
+
+    // Validate update fields (all optional)
+    $updateValidation = api_validate_params([
+        'name' => ['string', 'POST', false],
+        'element_code' => ['string', 'POST', false],
+        'level_code' => ['string', 'POST', false],
+        'description' => ['string', 'POST', false],
+        'quantity' => ['float', 'POST', false],
+        'unit' => ['string', 'POST', false],
+        'capex' => ['float', 'POST', false],
+        'urgency' => ['int', 'POST', false],
+        'condition_score' => ['int', 'POST', false]
+    ]);
+
+    if (!$updateValidation['success']) {
+        return api_error($updateValidation['errors']);
     }
 
-    db_begin_transaction();
-    try {
-        $updateData = ['updated_at' => date('Y-m-d H:i:s')];
+    // Filter out null values
+    $updateData = array_filter(
+        $updateValidation['data'],
+        fn($value) => $value !== null
+    );
 
-        // Only update provided fields
-        if (isset($_POST['name'])) {
-            $updateData['name'] = sanitize_string($_POST['name']);
-        }
-        if (isset($_POST['element_code'])) {
-            $updateData['element_code'] = sanitize_string($_POST['element_code']);
-        }
-        if (isset($_POST['level_code'])) {
-            $updateData['level_code'] = sanitize_string($_POST['level_code']);
-        }
-        if (isset($_POST['description'])) {
-            $updateData['description'] = sanitize_string($_POST['description']);
-        }
-        if (isset($_POST['quantity'])) {
-            $updateData['quantity'] = sanitize_float($_POST['quantity']);
-        }
-        if (isset($_POST['unit'])) {
-            $updateData['unit'] = sanitize_string($_POST['unit']);
-        }
-        if (isset($_POST['capex'])) {
-            $updateData['capex'] = sanitize_float($_POST['capex']);
-        }
-        if (isset($_POST['urgency'])) {
-            $updateData['urgency'] = sanitize_int($_POST['urgency']);
-        }
-        if (isset($_POST['condition_score'])) {
-            $updateData['condition_score'] = sanitize_int($_POST['condition_score']);
-        }
-
-        db_update('building_elements', $updateData, 'id = :id', ['id' => $elementId]);
-
-        db_commit();
-
-        log_activity('element_updated', 'element', $elementId);
-
-        return [
-            'success' => true,
-            'message' => 'Element opdateret succesfuldt'
-        ];
-
-    } catch (Exception $e) {
-        db_rollback();
-        return ['success' => false, 'error' => 'Kunne ikke opdatere element'];
+    if (empty($updateData)) {
+        return api_error('Ingen felter at opdatere');
     }
+
+    // Use api_crud_update with project access check
+    return api_crud_update(
+        'building_elements',
+        $elementId,
+        $updateData,
+        function($element) use ($user) {
+            // Get project_id from building
+            $building = db_fetch("SELECT project_id FROM buildings WHERE id = :id", ['id' => $element['building_id']]);
+            return $building && can_access_project($user, $building['project_id'], 'editor');
+        },
+        function($elementId) {
+            log_activity('element_updated', 'element', $elementId);
+        },
+        'Element opdateret succesfuldt',
+        'Kunne ikke opdatere element',
+        'Element ikke fundet',
+        'Ingen adgang til at redigere element'
+    );
 }
 
 /**
@@ -332,67 +333,54 @@ function handle_update(array $user): array {
  * OPTIMIZED: Uses validation function to check deletion eligibility
  */
 function handle_delete(array $user): array {
-    csrf_require();
-
-    $elementId = sanitize_int($_POST['id'] ?? 0);
-
-    if (!$elementId) {
-        return ['success' => false, 'error' => 'Element ID mangler'];
+    // Validate CSRF token
+    $csrfCheck = api_require_csrf();
+    if (!$csrfCheck['success']) {
+        return $csrfCheck;
     }
 
-    // Get element to check project access
-    $element = db_fetch("
-        SELECT be.*, b.project_id
-        FROM building_elements be
-        JOIN buildings b ON b.id = be.building_id
-        WHERE be.id = :id
-    ", ['id' => $elementId]);
+    // Validate ID
+    $validation = api_validate_params([
+        'id' => ['int', 'POST', true]
+    ]);
 
-    if (!$element) {
-        return ['success' => false, 'error' => 'Element ikke fundet'];
+    if (!$validation['success']) {
+        return api_error($validation['errors']);
     }
 
-    // Check project access (editor required)
-    if (!can_access_project($user, $element['project_id'], 'editor')) {
-        return ['success' => false, 'error' => 'Ingen adgang til at slette element'];
-    }
+    $elementId = $validation['data']['id'];
 
-    // OPTIMIZED: Check if element can be deleted using database function
-    $canDelete = db_fetch("
-        SELECT * FROM can_delete_element(:element_id)
-    ", ['element_id' => $elementId]);
+    // Use api_crud_delete with custom validation
+    return api_crud_delete(
+        'building_elements',
+        $elementId,
+        function($element) use ($user) {
+            // Get project_id from building
+            $building = db_fetch("SELECT project_id FROM buildings WHERE id = :id", ['id' => $element['building_id']]);
+            return $building && can_access_project($user, $building['project_id'], 'editor');
+        },
+        function($elementId) {
+            // OPTIMIZED: Check if element can be deleted using database function
+            $canDelete = db_fetch("
+                SELECT * FROM can_delete_element(:element_id)
+            ", ['element_id' => $elementId]);
 
-    if (!$canDelete['can_delete']) {
-        return [
-            'success' => false,
-            'error' => $canDelete['reason']
-        ];
-    }
+            if (!$canDelete['can_delete']) {
+                throw new Exception($canDelete['reason']);
+            }
 
-    db_begin_transaction();
-    try {
-        // Delete budget lines
-        db_execute("DELETE FROM budget_lines WHERE element_id = :id", ['id' => $elementId]);
-
-        // Delete element images
-        db_execute("DELETE FROM element_images WHERE element_id = :id", ['id' => $elementId]);
-
-        // Delete element
-        db_delete('building_elements', 'id = :id', ['id' => $elementId]);
-
-        db_commit();
-
-        log_activity('element_deleted', 'element', $elementId);
-
-        return [
-            'success' => true,
-            'message' => 'Element slettet succesfuldt'
-        ];
-
-    } catch (Exception $e) {
-        db_rollback();
-        return ['success' => false, 'error' => 'Kunne ikke slette element'];
-    }
+            // Delete related data
+            db_execute("DELETE FROM budget_lines WHERE element_id = :id", ['id' => $elementId]);
+            db_execute("DELETE FROM element_images WHERE element_id = :id", ['id' => $elementId]);
+        },
+        function($elementId) {
+            log_activity('element_deleted', 'element', $elementId);
+        },
+        'Element slettet succesfuldt',
+        'Kunne ikke slette element',
+        'Element ikke fundet',
+        'Ingen adgang til at slette element'
+    );
 }
 
 /**
@@ -400,14 +388,24 @@ function handle_delete(array $user): array {
  * POST ?module=element&action=move
  */
 function handle_move(array $user): array {
-    csrf_require();
-
-    $elementId = sanitize_int($_POST['id'] ?? 0);
-    $newParentId = isset($_POST['new_parent_id']) ? sanitize_int($_POST['new_parent_id']) : null;
-
-    if (!$elementId) {
-        return ['success' => false, 'error' => 'Element ID mangler'];
+    // Validate CSRF token
+    $csrfCheck = api_require_csrf();
+    if (!$csrfCheck['success']) {
+        return $csrfCheck;
     }
+
+    // Validate parameters
+    $validation = api_validate_params([
+        'id' => ['int', 'POST', true],
+        'new_parent_id' => ['int', 'POST', false, null]
+    ]);
+
+    if (!$validation['success']) {
+        return api_error($validation['errors']);
+    }
+
+    $elementId = $validation['data']['id'];
+    $newParentId = $validation['data']['new_parent_id'];
 
     // Get element to check project access
     $element = db_fetch("
@@ -418,72 +416,68 @@ function handle_move(array $user): array {
     ", ['id' => $elementId]);
 
     if (!$element) {
-        return ['success' => false, 'error' => 'Element ikke fundet'];
+        return api_error('Element ikke fundet');
     }
 
     // Check project access (editor required)
-    if (!can_access_project($user, $element['project_id'], 'editor')) {
-        return ['success' => false, 'error' => 'Ingen adgang til at flytte element'];
+    $accessCheck = api_require_project_access($user, $element['project_id'], 'editor');
+    if (!$accessCheck['success']) {
+        return $accessCheck;
     }
 
-    // Prevent moving to self or descendant
+    // Prevent moving to self
     if ($newParentId === $elementId) {
-        return ['success' => false, 'error' => 'Element kan ikke flyttes til sig selv'];
+        return api_error('Element kan ikke flyttes til sig selv');
     }
 
+    // Validate new parent
     if ($newParentId !== null) {
-        // Check if new parent exists and is in same building
         $newParent = db_fetch("
             SELECT building_id FROM building_elements WHERE id = :id
         ", ['id' => $newParentId]);
 
         if (!$newParent) {
-            return ['success' => false, 'error' => 'Ny forælder ikke fundet'];
+            return api_error('Ny forælder ikke fundet');
         }
 
         if ($newParent['building_id'] != $element['building_id']) {
-            return ['success' => false, 'error' => 'Element kan kun flyttes inden for samme bygning'];
+            return api_error('Element kan kun flyttes inden for samme bygning');
         }
 
-        // Check for circular reference (is new parent a descendant?)
+        // Check for circular reference
         if (is_descendant_of($newParentId, $elementId)) {
-            return ['success' => false, 'error' => 'Element kan ikke flyttes til et af sine underordnede'];
+            return api_error('Element kan ikke flyttes til et af sine underordnede');
         }
     }
 
-    db_begin_transaction();
-    try {
-        // Get next display order in new location
-        $maxOrder = db_value("
-            SELECT COALESCE(MAX(display_order), 0)
-            FROM building_elements
-            WHERE building_id = :building_id AND parent_id " . ($newParentId ? "= :parent_id" : "IS NULL"),
-            $newParentId ? ['building_id' => $element['building_id'], 'parent_id' => $newParentId] : ['building_id' => $element['building_id']]
-        );
+    // Use api_transaction for the move operation
+    return api_transaction(
+        function() use ($elementId, $newParentId, $element) {
+            // Get next display order in new location
+            $maxOrder = db_value("
+                SELECT COALESCE(MAX(display_order), 0)
+                FROM building_elements
+                WHERE building_id = :building_id AND parent_id " . ($newParentId ? "= :parent_id" : "IS NULL"),
+                $newParentId ? ['building_id' => $element['building_id'], 'parent_id' => $newParentId] : ['building_id' => $element['building_id']]
+            );
 
-        db_update('building_elements',
-            [
-                'parent_id' => $newParentId,
-                'display_order' => $maxOrder + 1,
-                'updated_at' => date('Y-m-d H:i:s')
-            ],
-            'id = :id',
-            ['id' => $elementId]
-        );
+            db_update('building_elements',
+                [
+                    'parent_id' => $newParentId,
+                    'display_order' => $maxOrder + 1,
+                    'updated_at' => date('Y-m-d H:i:s')
+                ],
+                'id = :id',
+                ['id' => $elementId]
+            );
 
-        db_commit();
+            log_activity('element_moved', 'element', $elementId);
 
-        log_activity('element_moved', 'element', $elementId);
-
-        return [
-            'success' => true,
-            'message' => 'Element flyttet succesfuldt'
-        ];
-
-    } catch (Exception $e) {
-        db_rollback();
-        return ['success' => false, 'error' => 'Kunne ikke flytte element'];
-    }
+            return ['element_id' => $elementId];
+        },
+        'Element flyttet succesfuldt',
+        'Kunne ikke flytte element'
+    );
 }
 
 /**
@@ -491,59 +485,69 @@ function handle_move(array $user): array {
  * POST ?module=element&action=update_order
  */
 function handle_update_order(array $user): array {
-    csrf_require();
+    // Validate CSRF token
+    $csrfCheck = api_require_csrf();
+    if (!$csrfCheck['success']) {
+        return $csrfCheck;
+    }
 
-    $buildingId = sanitize_int($_POST['building_id'] ?? 0);
-    $parentId = isset($_POST['parent_id']) ? sanitize_int($_POST['parent_id']) : null;
+    // Validate parameters
+    $validation = api_validate_params([
+        'building_id' => ['int', 'POST', true],
+        'parent_id' => ['int', 'POST', false, null]
+    ]);
+
+    if (!$validation['success']) {
+        return api_error($validation['errors']);
+    }
+
+    $buildingId = $validation['data']['building_id'];
+    $parentId = $validation['data']['parent_id'];
     $elementIds = $_POST['element_ids'] ?? [];
 
-    if (!$buildingId || !is_array($elementIds)) {
-        return ['success' => false, 'error' => 'Bygnings ID og element ID liste er påkrævet'];
+    if (!is_array($elementIds) || empty($elementIds)) {
+        return api_error('Element ID liste er påkrævet');
     }
 
     // Get building to check project access
     $building = db_fetch("SELECT project_id FROM buildings WHERE id = :id", ['id' => $buildingId]);
 
     if (!$building) {
-        return ['success' => false, 'error' => 'Bygning ikke fundet'];
+        return api_error('Bygning ikke fundet');
     }
 
     // Check project access (editor required)
-    if (!can_access_project($user, $building['project_id'], 'editor')) {
-        return ['success' => false, 'error' => 'Ingen adgang til at ændre rækkefølge'];
+    $accessCheck = api_require_project_access($user, $building['project_id'], 'editor');
+    if (!$accessCheck['success']) {
+        return $accessCheck;
     }
 
-    db_begin_transaction();
-    try {
-        foreach ($elementIds as $order => $elementId) {
-            $elementId = sanitize_int($elementId);
-            $whereClause = 'id = :id AND building_id = :building_id AND parent_id ' .
-                           ($parentId ? '= :parent_id' : 'IS NULL');
-            $params = ['id' => $elementId, 'building_id' => $buildingId];
-            if ($parentId) {
-                $params['parent_id'] = $parentId;
+    // Use api_transaction for reordering
+    return api_transaction(
+        function() use ($elementIds, $buildingId, $parentId) {
+            foreach ($elementIds as $order => $elementId) {
+                $elementId = sanitize_int($elementId);
+                $whereClause = 'id = :id AND building_id = :building_id AND parent_id ' .
+                               ($parentId ? '= :parent_id' : 'IS NULL');
+                $params = ['id' => $elementId, 'building_id' => $buildingId];
+                if ($parentId) {
+                    $params['parent_id'] = $parentId;
+                }
+
+                db_update('building_elements',
+                    ['display_order' => $order + 1],
+                    $whereClause,
+                    $params
+                );
             }
 
-            db_update('building_elements',
-                ['display_order' => $order + 1],
-                $whereClause,
-                $params
-            );
-        }
+            log_activity('elements_reordered', 'building', $buildingId);
 
-        db_commit();
-
-        log_activity('elements_reordered', 'building', $buildingId);
-
-        return [
-            'success' => true,
-            'message' => 'Element rækkefølge opdateret'
-        ];
-
-    } catch (Exception $e) {
-        db_rollback();
-        return ['success' => false, 'error' => 'Kunne ikke opdatere rækkefølge'];
-    }
+            return ['reordered_count' => count($elementIds)];
+        },
+        'Element rækkefølge opdateret',
+        'Kunne ikke opdatere rækkefølge'
+    );
 }
 
 /**
@@ -552,22 +556,28 @@ function handle_update_order(array $user): array {
  * OPTIMIZED: Uses recursive CTE function - 1 query instead of 10+
  */
 function handle_get_hierarchy(array $user): array {
-    $buildingId = sanitize_int($_GET['building_id'] ?? 0);
+    // Validate parameters
+    $validation = api_validate_params([
+        'building_id' => ['int', 'GET', true]
+    ]);
 
-    if (!$buildingId) {
-        return ['success' => false, 'error' => 'Bygnings ID mangler'];
+    if (!$validation['success']) {
+        return api_error($validation['errors']);
     }
+
+    $buildingId = $validation['data']['building_id'];
 
     // Get building to check project access
     $building = db_fetch("SELECT project_id FROM buildings WHERE id = :id", ['id' => $buildingId]);
 
     if (!$building) {
-        return ['success' => false, 'error' => 'Bygning ikke fundet'];
+        return api_error('Bygning ikke fundet');
     }
 
     // Check project access
-    if (!can_access_project($user, $building['project_id'], 'viewer')) {
-        return ['success' => false, 'error' => 'Ingen adgang til bygningen'];
+    $accessCheck = api_require_project_access($user, $building['project_id'], 'viewer');
+    if (!$accessCheck['success']) {
+        return $accessCheck;
     }
 
     // OPTIMIZED: Use recursive CTE function - single query with full hierarchy and stats
@@ -586,72 +596,72 @@ function handle_get_hierarchy(array $user): array {
  * POST ?module=element&action=bulk_update
  */
 function handle_bulk_update(array $user): array {
-    csrf_require();
+    // Validate CSRF token
+    $csrfCheck = api_require_csrf();
+    if (!$csrfCheck['success']) {
+        return $csrfCheck;
+    }
 
     $updates = $_POST['updates'] ?? [];
 
     if (!is_array($updates) || empty($updates)) {
-        return ['success' => false, 'error' => 'Ingen opdateringer modtaget'];
+        return api_error('Ingen opdateringer modtaget');
     }
 
-    db_begin_transaction();
-    try {
-        $updatedCount = 0;
+    // Use api_transaction for bulk update
+    return api_transaction(
+        function() use ($updates, $user) {
+            $updatedCount = 0;
 
-        foreach ($updates as $update) {
-            $elementId = sanitize_int($update['id'] ?? 0);
-            if (!$elementId) {
-                continue;
+            foreach ($updates as $update) {
+                $elementId = sanitize_int($update['id'] ?? 0);
+                if (!$elementId) {
+                    continue;
+                }
+
+                // Get element to check project access
+                $element = db_fetch("
+                    SELECT be.*, b.project_id
+                    FROM building_elements be
+                    JOIN buildings b ON b.id = be.building_id
+                    WHERE be.id = :id
+                ", ['id' => $elementId]);
+
+                if (!$element) {
+                    continue;
+                }
+
+                // Check project access (editor required)
+                if (!can_access_project($user, $element['project_id'], 'editor')) {
+                    continue;
+                }
+
+                $updateData = ['updated_at' => date('Y-m-d H:i:s')];
+
+                // Apply updates
+                if (isset($update['urgency'])) {
+                    $updateData['urgency'] = sanitize_int($update['urgency']);
+                }
+                if (isset($update['condition_score'])) {
+                    $updateData['condition_score'] = sanitize_int($update['condition_score']);
+                }
+                if (isset($update['capex'])) {
+                    $updateData['capex'] = sanitize_float($update['capex']);
+                }
+
+                db_update('building_elements', $updateData, 'id = :id', ['id' => $elementId]);
+                $updatedCount++;
             }
 
-            // Get element to check project access
-            $element = db_fetch("
-                SELECT be.*, b.project_id
-                FROM building_elements be
-                JOIN buildings b ON b.id = be.building_id
-                WHERE be.id = :id
-            ", ['id' => $elementId]);
+            log_activity('elements_bulk_updated', 'system', 0);
 
-            if (!$element) {
-                continue;
-            }
-
-            // Check project access (editor required)
-            if (!can_access_project($user, $element['project_id'], 'editor')) {
-                continue;
-            }
-
-            $updateData = ['updated_at' => date('Y-m-d H:i:s')];
-
-            // Apply updates
-            if (isset($update['urgency'])) {
-                $updateData['urgency'] = sanitize_int($update['urgency']);
-            }
-            if (isset($update['condition_score'])) {
-                $updateData['condition_score'] = sanitize_int($update['condition_score']);
-            }
-            if (isset($update['capex'])) {
-                $updateData['capex'] = sanitize_float($update['capex']);
-            }
-
-            db_update('building_elements', $updateData, 'id = :id', ['id' => $elementId]);
-            $updatedCount++;
-        }
-
-        db_commit();
-
-        log_activity('elements_bulk_updated', 'system', 0);
-
-        return [
-            'success' => true,
-            'updated_count' => $updatedCount,
-            'message' => "$updatedCount elementer opdateret"
-        ];
-
-    } catch (Exception $e) {
-        db_rollback();
-        return ['success' => false, 'error' => 'Kunne ikke opdatere elementer'];
-    }
+            return ['updated_count' => $updatedCount];
+        },
+        function($result) {
+            return "{$result['updated_count']} elementer opdateret";
+        },
+        'Kunne ikke opdatere elementer'
+    );
 }
 
 /**
