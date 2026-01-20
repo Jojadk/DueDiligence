@@ -1,6 +1,6 @@
 <?php
 /**
- * WYSIWYG Editor Module API - Refactored with API Helpers
+ * WYSIWYG Editor Module API
  *
  * Handles rich text editing configuration and content processing
  *
@@ -12,7 +12,6 @@
  */
 
 require_once __DIR__ . '/../../core/permissions.php';
-require_once __DIR__ . '/../../core/api-helpers.php';
 
 /**
  * Get WYSIWYG editor configuration
@@ -64,14 +63,10 @@ function handle_get_config(array $user): array {
  * POST ?module=wysiwyg&action=upload_image
  */
 function handle_upload_image(array $user): array {
-    // Validate CSRF token
-    $csrfCheck = api_require_csrf();
-    if (!$csrfCheck['success']) {
-        return $csrfCheck;
-    }
+    csrf_require();
 
     if (!isset($_FILES['image']) || $_FILES['image']['error'] !== UPLOAD_ERR_OK) {
-        return api_error('Ingen fil uploadet');
+        return ['success' => false, 'error' => 'Ingen fil uploadet'];
     }
 
     $file = $_FILES['image'];
@@ -83,12 +78,12 @@ function handle_upload_image(array $user): array {
     finfo_close($finfo);
 
     if (!in_array($mimeType, $allowedTypes)) {
-        return api_error('Ugyldig filtype');
+        return ['success' => false, 'error' => 'Ugyldig filtype'];
     }
 
     // Validate file size (max 5MB for editor images)
     if ($file['size'] > 5 * 1024 * 1024) {
-        return api_error('Fil for stor (max 5MB)');
+        return ['success' => false, 'error' => 'Fil for stor (max 5MB)'];
     }
 
     try {
@@ -115,7 +110,7 @@ function handle_upload_image(array $user): array {
         ];
 
     } catch (Exception $e) {
-        return api_error('Upload fejlede: ' . $e->getMessage());
+        return ['success' => false, 'error' => 'Upload fejlede: ' . $e->getMessage()];
     }
 }
 
@@ -124,22 +119,13 @@ function handle_upload_image(array $user): array {
  * POST ?module=wysiwyg&action=process_content
  */
 function handle_process_content(array $user): array {
-    // Validate CSRF token
-    $csrfCheck = api_require_csrf();
-    if (!$csrfCheck['success']) {
-        return $csrfCheck;
+    csrf_require();
+
+    $content = $_POST['content'] ?? '';
+
+    if (empty($content)) {
+        return ['success' => false, 'error' => 'Intet indhold'];
     }
-
-    // Validate parameters
-    $validation = api_validate_params([
-        'content' => ['string', 'POST', true]
-    ]);
-
-    if (!$validation['success']) {
-        return api_error($validation['errors']);
-    }
-
-    $content = $validation['data']['content'];
 
     // Sanitize HTML content
     $sanitized = sanitize_html($content);
