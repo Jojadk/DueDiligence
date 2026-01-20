@@ -19,12 +19,22 @@
  * - update_tco_config: Update TCO configuration (admin)
  */
 
+require_once __DIR__ . '/../../core/api-helpers.php';
+
 /**
  * Get available OPEX categories
  * GET /api.php?module=opex&action=get_categories&building_id=123
  */
 function handle_get_categories(array $user): array {
-    $buildingId = sanitize_int($_GET['building_id'] ?? 0);
+    $validation = api_validate_params([
+        'building_id' => ['int', 'GET', false, 0]
+    ]);
+
+    if (!$validation['success']) {
+        return $validation;
+    }
+
+    $buildingId = $validation['data']['building_id'];
 
     if ($buildingId) {
         // Verify building access via project
@@ -36,11 +46,11 @@ function handle_get_categories(array $user): array {
         ", ['id' => $buildingId]);
 
         if (!$building) {
-            return ['success' => false, 'error' => 'Bygning ikke fundet'];
+            return api_error('Bygning ikke fundet');
         }
 
         if (!can_access_project($user, $building['project_id'], 'viewer')) {
-            return ['success' => false, 'error' => 'Ingen adgang'];
+            return api_error('Ingen adgang');
         }
 
         // Get categories not already assigned
@@ -76,18 +86,22 @@ function handle_get_categories(array $user): array {
  * GET /api.php?module=opex&action=get_category&id=123
  */
 function handle_get_category(array $user): array {
-    $categoryId = sanitize_int($_GET['id'] ?? 0);
+    $validation = api_validate_params([
+        'id' => ['int', 'GET', true]
+    ]);
 
-    if (!$categoryId) {
-        return ['success' => false, 'error' => 'Category ID mangler'];
+    if (!$validation['success']) {
+        return $validation;
     }
+
+    $categoryId = $validation['data']['id'];
 
     $category = db_fetch("
         SELECT * FROM opex_categories WHERE id = :id
     ", ['id' => $categoryId]);
 
     if (!$category) {
-        return ['success' => false, 'error' => 'Kategori ikke fundet'];
+        return api_error('Kategori ikke fundet');
     }
 
     return [
@@ -101,39 +115,42 @@ function handle_get_category(array $user): array {
  * POST /api.php {module: 'opex', action: 'create_category', ...}
  */
 function handle_create_category(array $user): array {
-    csrf_require();
+    $csrfCheck = api_require_csrf();
+    if (!$csrfCheck['success']) return $csrfCheck;
 
     // Admin only action - router already checked permission
 
-    $name = sanitize_string($_POST['name'] ?? '');
-    $description = sanitize_string($_POST['description'] ?? '');
-    $categoryType = sanitize_string($_POST['category_type'] ?? '');
-    $ratePerSqm = sanitize_float($_POST['rate_per_sqm'] ?? 0);
+    $validation = api_validate_params([
+        'name' => ['string', 'POST', true],
+        'description' => ['string', 'POST', false, ''],
+        'category_type' => ['string', 'POST', true],
+        'rate_per_sqm' => ['float', 'POST', true]
+    ]);
 
-    if (empty($name) || empty($categoryType) || $ratePerSqm <= 0) {
-        return ['success' => false, 'error' => 'Udfyld venligst alle påkrævede felter'];
+    if (!$validation['success']) {
+        return $validation;
     }
 
-    try {
-        $id = db_insert('opex_categories', [
-            'name' => $name,
-            'description' => $description,
-            'category_type' => $categoryType,
-            'rate_per_sqm' => $ratePerSqm,
+    $params = $validation['data'];
+
+    if ($params['rate_per_sqm'] <= 0) {
+        return api_error('Rate per m² skal være større end 0');
+    }
+
+    return api_crud_create(
+        'opex_categories',
+        [
+            'name' => $params['name'],
+            'description' => $params['description'],
+            'category_type' => $params['category_type'],
+            'rate_per_sqm' => $params['rate_per_sqm'],
             'is_active' => true
-        ]);
-
-        log_activity('opex_category_created', 'opex_category', $id);
-
-        return [
-            'success' => true,
-            'message' => 'OPEX kategori oprettet',
-            'id' => $id
-        ];
-    } catch (Exception $e) {
-        log_error('OPEX category creation error: ' . $e->getMessage());
-        return ['success' => false, 'error' => 'Kunne ikke oprette kategori'];
-    }
+        ],
+        null,
+        function($id) {
+            log_activity('opex_category_created', 'opex_category', $id);
+        }
+    );
 }
 
 /**
@@ -141,41 +158,51 @@ function handle_create_category(array $user): array {
  * POST /api.php {module: 'opex', action: 'update_category', id: 123, ...}
  */
 function handle_update_category(array $user): array {
-    csrf_require();
+    $csrfCheck = api_require_csrf();
+    if (!$csrfCheck['success']) return $csrfCheck;
 
-    $categoryId = sanitize_int($_POST['id'] ?? 0);
+    $validation = api_validate_params([
+        'id' => ['int', 'POST', true],
+        'name' => ['string', 'POST', false],
+        'description' => ['string', 'POST', false],
+        'category_type' => ['string', 'POST', false],
+        'rate_per_sqm' => ['float', 'POST', false]
+    ]);
 
-    if (!$categoryId) {
-        return ['success' => false, 'error' => 'Category ID mangler'];
+    if (!$validation['success']) {
+        return $validation;
     }
+
+    $params = $validation['data'];
+    $categoryId = $params['id'];
 
     $updates = [];
-
-    if (isset($_POST['name'])) {
-        $updates['name'] = sanitize_string($_POST['name']);
+    if (isset($params['name'])) {
+        $updates['name'] = $params['name'];
     }
-    if (isset($_POST['description'])) {
-        $updates['description'] = sanitize_string($_POST['description']);
+    if (isset($params['description'])) {
+        $updates['description'] = $params['description'];
     }
-    if (isset($_POST['category_type'])) {
-        $updates['category_type'] = sanitize_string($_POST['category_type']);
+    if (isset($params['category_type'])) {
+        $updates['category_type'] = $params['category_type'];
     }
-    if (isset($_POST['rate_per_sqm'])) {
-        $updates['rate_per_sqm'] = sanitize_float($_POST['rate_per_sqm']);
+    if (isset($params['rate_per_sqm'])) {
+        $updates['rate_per_sqm'] = $params['rate_per_sqm'];
     }
 
     if (empty($updates)) {
-        return ['success' => false, 'error' => 'Ingen opdateringer'];
+        return api_error('Ingen opdateringer');
     }
 
-    db_update('opex_categories', $updates, 'id = :id', ['id' => $categoryId]);
-
-    log_activity('opex_category_updated', 'opex_category', $categoryId);
-
-    return [
-        'success' => true,
-        'message' => 'Kategori opdateret'
-    ];
+    return api_crud_update(
+        'opex_categories',
+        $categoryId,
+        $updates,
+        null,
+        function($id) {
+            log_activity('opex_category_updated', 'opex_category', $id);
+        }
+    );
 }
 
 /**
@@ -183,14 +210,21 @@ function handle_update_category(array $user): array {
  * POST /api.php {module: 'opex', action: 'toggle_category', id: 123, is_active: true/false}
  */
 function handle_toggle_category(array $user): array {
-    csrf_require();
+    $csrfCheck = api_require_csrf();
+    if (!$csrfCheck['success']) return $csrfCheck;
 
-    $categoryId = sanitize_int($_POST['id'] ?? 0);
-    $isActive = filter_var($_POST['is_active'] ?? true, FILTER_VALIDATE_BOOLEAN);
+    $validation = api_validate_params([
+        'id' => ['int', 'POST', true],
+        'is_active' => ['bool', 'POST', false, true]
+    ]);
 
-    if (!$categoryId) {
-        return ['success' => false, 'error' => 'Category ID mangler'];
+    if (!$validation['success']) {
+        return $validation;
     }
+
+    $params = $validation['data'];
+    $categoryId = $params['id'];
+    $isActive = $params['is_active'];
 
     db_update('opex_categories', [
         'is_active' => $isActive
@@ -209,56 +243,56 @@ function handle_toggle_category(array $user): array {
  * POST /api.php {module: 'opex', action: 'assign_to_building', building_id: 123, category_id: 456, ...}
  */
 function handle_assign_to_building(array $user): array {
-    csrf_require();
+    $csrfCheck = api_require_csrf();
+    if (!$csrfCheck['success']) return $csrfCheck;
 
-    $buildingId = sanitize_int($_POST['building_id'] ?? 0);
-    $categoryId = sanitize_int($_POST['category_id'] ?? 0);
-    $customRate = !empty($_POST['custom_rate']) ? sanitize_float($_POST['custom_rate']) : null;
-    $notes = sanitize_string($_POST['notes'] ?? '');
+    $validation = api_validate_params([
+        'building_id' => ['int', 'POST', true],
+        'category_id' => ['int', 'POST', true],
+        'custom_rate' => ['float', 'POST', false, null],
+        'notes' => ['string', 'POST', false, '']
+    ]);
 
-    if (!$buildingId || !$categoryId) {
-        return ['success' => false, 'error' => 'Building ID og Category ID påkrævet'];
+    if (!$validation['success']) {
+        return $validation;
     }
+
+    $params = $validation['data'];
 
     // Verify building access
     $building = db_fetch("
         SELECT b.project_id
         FROM buildings b
         WHERE b.id = :id
-    ", ['id' => $buildingId]);
+    ", ['id' => $params['building_id']]);
 
     if (!$building) {
-        return ['success' => false, 'error' => 'Bygning ikke fundet'];
+        return api_error('Bygning ikke fundet');
     }
 
     if (!can_access_project($user, $building['project_id'], 'editor')) {
-        return ['success' => false, 'error' => 'Ingen redigerings adgang'];
+        return api_error('Ingen redigerings adgang');
     }
 
-    // Verify category exists
-    $category = db_fetch("SELECT * FROM opex_categories WHERE id = :id", ['id' => $categoryId]);
-    if (!$category) {
-        return ['success' => false, 'error' => 'Kategori ikke fundet'];
-    }
-
-    try {
-        db_insert('building_opex', [
-            'building_id' => $buildingId,
-            'opex_category_id' => $categoryId,
-            'custom_rate_per_sqm' => $customRate,
-            'notes' => $notes
-        ]);
-
-        log_activity('opex_assigned', 'building', $buildingId);
-
-        return [
-            'success' => true,
-            'message' => 'OPEX kategori tilføjet'
-        ];
-    } catch (Exception $e) {
-        log_error('OPEX assignment error: ' . $e->getMessage());
-        return ['success' => false, 'error' => 'Kunne ikke tilføje OPEX kategori'];
-    }
+    return api_crud_create(
+        'building_opex',
+        [
+            'building_id' => $params['building_id'],
+            'opex_category_id' => $params['category_id'],
+            'custom_rate_per_sqm' => $params['custom_rate'],
+            'notes' => $params['notes']
+        ],
+        function($data) {
+            // Verify category exists
+            $category = db_fetch("SELECT * FROM opex_categories WHERE id = :id", ['id' => $data['opex_category_id']]);
+            if (!$category) {
+                throw new Exception('Kategori ikke fundet');
+            }
+        },
+        function($id) use ($params) {
+            log_activity('opex_assigned', 'building', $params['building_id']);
+        }
+    );
 }
 
 /**
@@ -266,35 +300,35 @@ function handle_assign_to_building(array $user): array {
  * GET /api.php?module=opex&action=get_assignment&id=123
  */
 function handle_get_assignment(array $user): array {
-    $assignmentId = sanitize_int($_GET['id'] ?? 0);
+    $validation = api_validate_params([
+        'id' => ['int', 'GET', true]
+    ]);
 
-    if (!$assignmentId) {
-        return ['success' => false, 'error' => 'Assignment ID mangler'];
+    if (!$validation['success']) {
+        return $validation;
     }
 
-    $assignment = db_fetch("
-        SELECT bo.*, oc.name, oc.rate_per_sqm as default_rate, oc.category_type,
+    $assignmentId = $validation['data']['id'];
+
+    return api_get_entity(
+        'building_opex',
+        $assignmentId,
+        function($assignment) use ($user) {
+            // Verify access
+            if (!can_access_project($user, $assignment['user_id'], 'viewer')) {
+                throw new Exception('Ingen adgang');
+            }
+
+            return $assignment;
+        },
+        "SELECT bo.*, oc.name, oc.rate_per_sqm as default_rate, oc.category_type,
                p.user_id
         FROM building_opex bo
         JOIN opex_categories oc ON bo.opex_category_id = oc.id
         JOIN buildings b ON bo.building_id = b.id
         JOIN projects p ON b.project_id = p.id
-        WHERE bo.id = :id
-    ", ['id' => $assignmentId]);
-
-    if (!$assignment) {
-        return ['success' => false, 'error' => 'Tildeling ikke fundet'];
-    }
-
-    // Verify access
-    if (!can_access_project($user, $assignment['user_id'], 'viewer')) {
-        return ['success' => false, 'error' => 'Ingen adgang'];
-    }
-
-    return [
-        'success' => true,
-        'assignment' => $assignment
-    ];
+        WHERE bo.id = :id"
+    );
 }
 
 /**
@@ -302,44 +336,51 @@ function handle_get_assignment(array $user): array {
  * POST /api.php {module: 'opex', action: 'update_assignment', id: 123, ...}
  */
 function handle_update_assignment(array $user): array {
-    csrf_require();
+    $csrfCheck = api_require_csrf();
+    if (!$csrfCheck['success']) return $csrfCheck;
 
-    $assignmentId = sanitize_int($_POST['id'] ?? 0);
-    $customRate = !empty($_POST['custom_rate']) ? sanitize_float($_POST['custom_rate']) : null;
-    $notes = sanitize_string($_POST['notes'] ?? '');
+    $validation = api_validate_params([
+        'id' => ['int', 'POST', true],
+        'custom_rate' => ['float', 'POST', false, null],
+        'notes' => ['string', 'POST', false, '']
+    ]);
 
-    if (!$assignmentId) {
-        return ['success' => false, 'error' => 'Assignment ID mangler'];
+    if (!$validation['success']) {
+        return $validation;
     }
 
-    // Verify ownership
-    $assignment = db_fetch("
-        SELECT bo.building_id, p.id as project_id
-        FROM building_opex bo
-        JOIN buildings b ON bo.building_id = b.id
-        JOIN projects p ON b.project_id = p.id
-        WHERE bo.id = :id
-    ", ['id' => $assignmentId]);
+    $params = $validation['data'];
+    $assignmentId = $params['id'];
 
-    if (!$assignment) {
-        return ['success' => false, 'error' => 'Tildeling ikke fundet'];
-    }
+    return api_crud_update(
+        'building_opex',
+        $assignmentId,
+        [
+            'custom_rate_per_sqm' => $params['custom_rate'],
+            'notes' => $params['notes']
+        ],
+        function($assignment) use ($user) {
+            // Verify ownership
+            $data = db_fetch("
+                SELECT bo.building_id, p.id as project_id
+                FROM building_opex bo
+                JOIN buildings b ON bo.building_id = b.id
+                JOIN projects p ON b.project_id = p.id
+                WHERE bo.id = :id
+            ", ['id' => $assignment['id']]);
 
-    if (!can_access_project($user, $assignment['project_id'], 'editor')) {
-        return ['success' => false, 'error' => 'Ingen redigerings adgang'];
-    }
+            if (!$data) {
+                throw new Exception('Tildeling ikke fundet');
+            }
 
-    db_update('building_opex', [
-        'custom_rate_per_sqm' => $customRate,
-        'notes' => $notes
-    ], 'id = :id', ['id' => $assignmentId]);
-
-    log_activity('opex_updated', 'building_opex', $assignmentId);
-
-    return [
-        'success' => true,
-        'message' => 'OPEX opdateret'
-    ];
+            if (!can_access_project($user, $data['project_id'], 'editor')) {
+                throw new Exception('Ingen redigerings adgang');
+            }
+        },
+        function($id) {
+            log_activity('opex_updated', 'building_opex', $id);
+        }
+    );
 }
 
 /**
@@ -347,39 +388,44 @@ function handle_update_assignment(array $user): array {
  * POST /api.php {module: 'opex', action: 'remove_assignment', id: 123}
  */
 function handle_remove_assignment(array $user): array {
-    csrf_require();
+    $csrfCheck = api_require_csrf();
+    if (!$csrfCheck['success']) return $csrfCheck;
 
-    $assignmentId = sanitize_int($_POST['id'] ?? 0);
+    $validation = api_validate_params([
+        'id' => ['int', 'POST', true]
+    ]);
 
-    if (!$assignmentId) {
-        return ['success' => false, 'error' => 'Assignment ID mangler'];
+    if (!$validation['success']) {
+        return $validation;
     }
 
-    // Verify ownership
-    $assignment = db_fetch("
-        SELECT bo.building_id, p.id as project_id
-        FROM building_opex bo
-        JOIN buildings b ON bo.building_id = b.id
-        JOIN projects p ON b.project_id = p.id
-        WHERE bo.id = :id
-    ", ['id' => $assignmentId]);
+    $assignmentId = $validation['data']['id'];
 
-    if (!$assignment) {
-        return ['success' => false, 'error' => 'Tildeling ikke fundet'];
-    }
+    return api_crud_delete(
+        'building_opex',
+        $assignmentId,
+        function($assignment) use ($user) {
+            // Verify ownership
+            $data = db_fetch("
+                SELECT bo.building_id, p.id as project_id
+                FROM building_opex bo
+                JOIN buildings b ON bo.building_id = b.id
+                JOIN projects p ON b.project_id = p.id
+                WHERE bo.id = :id
+            ", ['id' => $assignment['id']]);
 
-    if (!can_access_project($user, $assignment['project_id'], 'editor')) {
-        return ['success' => false, 'error' => 'Ingen redigerings adgang'];
-    }
+            if (!$data) {
+                throw new Exception('Tildeling ikke fundet');
+            }
 
-    db_delete('building_opex', 'id = :id', ['id' => $assignmentId]);
-
-    log_activity('opex_removed', 'building_opex', $assignmentId);
-
-    return [
-        'success' => true,
-        'message' => 'OPEX kategori fjernet'
-    ];
+            if (!can_access_project($user, $data['project_id'], 'editor')) {
+                throw new Exception('Ingen redigerings adgang');
+            }
+        },
+        function($id) {
+            log_activity('opex_removed', 'building_opex', $id);
+        }
+    );
 }
 
 /**
@@ -389,11 +435,15 @@ function handle_remove_assignment(array $user): array {
  * GET /api.php?module=opex&action=calculate_tco&building_id=123
  */
 function handle_calculate_tco(array $user): array {
-    $buildingId = sanitize_int($_GET['building_id'] ?? 0);
+    $validation = api_validate_params([
+        'building_id' => ['int', 'GET', true]
+    ]);
 
-    if (!$buildingId) {
-        return ['success' => false, 'error' => 'Building ID mangler'];
+    if (!$validation['success']) {
+        return $validation;
     }
+
+    $buildingId = $validation['data']['building_id'];
 
     // Get building and verify access
     $building = db_fetch("
@@ -404,11 +454,11 @@ function handle_calculate_tco(array $user): array {
     ", ['id' => $buildingId]);
 
     if (!$building) {
-        return ['success' => false, 'error' => 'Bygning ikke fundet'];
+        return api_error('Bygning ikke fundet');
     }
 
     if (!can_access_project($user, $building['project_id'], 'viewer')) {
-        return ['success' => false, 'error' => 'Ingen adgang'];
+        return api_error('Ingen adgang');
     }
 
     // Get TCO configuration
@@ -475,31 +525,28 @@ function handle_calculate_tco(array $user): array {
  * POST /api.php {module: 'opex', action: 'update_tco_config', config: {...}}
  */
 function handle_update_tco_config(array $user): array {
-    csrf_require();
+    $csrfCheck = api_require_csrf();
+    if (!$csrfCheck['success']) return $csrfCheck;
 
     // Admin only - router already checked permission
 
     $configs = $_POST['config'] ?? [];
 
-    if (empty($configs)) {
-        return ['success' => false, 'error' => 'Ingen konfiguration angivet'];
+    if (empty($configs) || !is_array($configs)) {
+        return api_error('Ingen konfiguration angivet');
     }
 
-    try {
-        foreach ($configs as $key => $value) {
-            db_update('tco_config', [
-                'config_value' => sanitize_float($value)
-            ], 'config_key = :key', ['key' => sanitize_string($key)]);
-        }
+    return api_transaction(
+        function() use ($configs) {
+            foreach ($configs as $key => $value) {
+                db_update('tco_config', [
+                    'config_value' => sanitize_float($value)
+                ], 'config_key = :key', ['key' => sanitize_string($key)]);
+            }
 
-        log_activity('tco_config_updated', 'tco_config', 0);
-
-        return [
-            'success' => true,
-            'message' => 'TCO konfiguration opdateret'
-        ];
-    } catch (Exception $e) {
-        log_error('TCO config update error: ' . $e->getMessage());
-        return ['success' => false, 'error' => 'Kunne ikke opdatere konfiguration'];
-    }
+            log_activity('tco_config_updated', 'tco_config', 0);
+        },
+        'TCO konfiguration opdateret',
+        'Kunne ikke opdatere konfiguration'
+    );
 }
