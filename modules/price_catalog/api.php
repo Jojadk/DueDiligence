@@ -25,6 +25,7 @@
  */
 
 require_once __DIR__ . '/../../core/permissions.php';
+require_once __DIR__ . '/../../core/api-helpers.php';
 
 /**
  * Get price categories
@@ -52,50 +53,48 @@ function handle_get_categories(array $user): array {
  * POST ?module=price_catalog&action=create_category
  */
 function handle_create_category(array $user): array {
-    csrf_require();
+    $csrfCheck = api_require_csrf();
+    if (!$csrfCheck['success']) return $csrfCheck;
 
-    $name = sanitize_string($_POST['name'] ?? '');
-    $description = sanitize_string($_POST['description'] ?? '');
-    $parentId = isset($_POST['parent_id']) ? sanitize_int($_POST['parent_id']) : null;
+    $validation = api_validate_params([
+        'name' => ['string', 'POST', true],
+        'description' => ['string', 'POST', false, ''],
+        'parent_id' => ['int', 'POST', false, null]
+    ]);
 
-    if (!$name) {
-        return ['success' => false, 'error' => 'Kategori navn er påkrævet'];
+    if (!$validation['success']) {
+        return $validation;
     }
 
-    db_begin_transaction();
-    try {
-        // Get next display order
-        $maxOrder = db_value("
-            SELECT COALESCE(MAX(display_order), 0)
-            FROM price_categories
-            WHERE parent_id " . ($parentId ? "= :parent_id" : "IS NULL"),
-            $parentId ? ['parent_id' => $parentId] : []
-        );
+    $params = $validation['data'];
 
-        $categoryData = [
-            'name' => $name,
-            'description' => $description,
-            'parent_id' => $parentId,
-            'display_order' => $maxOrder + 1,
-            'created_at' => date('Y-m-d H:i:s')
-        ];
+    return api_transaction(
+        function() use ($params) {
+            // Get next display order
+            $maxOrder = db_value("
+                SELECT COALESCE(MAX(display_order), 0)
+                FROM price_categories
+                WHERE parent_id " . ($params['parent_id'] ? "= :parent_id" : "IS NULL"),
+                $params['parent_id'] ? ['parent_id' => $params['parent_id']] : []
+            );
 
-        $categoryId = db_insert('price_categories', $categoryData);
+            $categoryData = [
+                'name' => $params['name'],
+                'description' => $params['description'],
+                'parent_id' => $params['parent_id'],
+                'display_order' => $maxOrder + 1,
+                'created_at' => date('Y-m-d H:i:s')
+            ];
 
-        db_commit();
+            $categoryId = db_insert('price_categories', $categoryData);
 
-        log_activity('price_category_created', 'price_category', $categoryId);
+            log_activity('price_category_created', 'price_category', $categoryId);
 
-        return [
-            'success' => true,
-            'category_id' => $categoryId,
-            'message' => 'Kategori oprettet'
-        ];
-
-    } catch (Exception $e) {
-        db_rollback();
-        return ['success' => false, 'error' => 'Kunne ikke oprette kategori'];
-    }
+            return ['category_id' => $categoryId];
+        },
+        'Kategori oprettet',
+        'Kunne ikke oprette kategori'
+    );
 }
 
 /**
@@ -103,43 +102,43 @@ function handle_create_category(array $user): array {
  * POST ?module=price_catalog&action=update_category
  */
 function handle_update_category(array $user): array {
-    csrf_require();
+    $csrfCheck = api_require_csrf();
+    if (!$csrfCheck['success']) return $csrfCheck;
 
-    $categoryId = sanitize_int($_POST['id'] ?? 0);
+    $validation = api_validate_params([
+        'id' => ['int', 'POST', true],
+        'name' => ['string', 'POST', false],
+        'description' => ['string', 'POST', false]
+    ]);
 
-    if (!$categoryId) {
-        return ['success' => false, 'error' => 'Kategori ID mangler'];
+    if (!$validation['success']) {
+        return $validation;
     }
 
-    db_begin_transaction();
-    try {
-        $updateData = [];
+    $params = $validation['data'];
+    $categoryId = $params['id'];
 
-        if (isset($_POST['name'])) {
-            $updateData['name'] = sanitize_string($_POST['name']);
-        }
-
-        if (isset($_POST['description'])) {
-            $updateData['description'] = sanitize_string($_POST['description']);
-        }
-
-        if (!empty($updateData)) {
-            db_update('price_categories', $updateData, 'id = :id', ['id' => $categoryId]);
-        }
-
-        db_commit();
-
-        log_activity('price_category_updated', 'price_category', $categoryId);
-
-        return [
-            'success' => true,
-            'message' => 'Kategori opdateret'
-        ];
-
-    } catch (Exception $e) {
-        db_rollback();
-        return ['success' => false, 'error' => 'Kunne ikke opdatere kategori'];
+    $updateData = [];
+    if (isset($params['name'])) {
+        $updateData['name'] = $params['name'];
     }
+    if (isset($params['description'])) {
+        $updateData['description'] = $params['description'];
+    }
+
+    if (empty($updateData)) {
+        return api_error('Ingen opdateringer');
+    }
+
+    return api_crud_update(
+        'price_categories',
+        $categoryId,
+        $updateData,
+        null,
+        function($id) {
+            log_activity('price_category_updated', 'price_category', $id);
+        }
+    );
 }
 
 /**
@@ -147,43 +146,36 @@ function handle_update_category(array $user): array {
  * POST ?module=price_catalog&action=delete_category
  */
 function handle_delete_category(array $user): array {
-    csrf_require();
+    $csrfCheck = api_require_csrf();
+    if (!$csrfCheck['success']) return $csrfCheck;
 
-    $categoryId = sanitize_int($_POST['id'] ?? 0);
+    $validation = api_validate_params([
+        'id' => ['int', 'POST', true]
+    ]);
 
-    if (!$categoryId) {
-        return ['success' => false, 'error' => 'Kategori ID mangler'];
+    if (!$validation['success']) {
+        return $validation;
     }
 
-    // Check if category has items
-    $itemCount = db_value("
-        SELECT COUNT(*) FROM price_catalog_items WHERE category_id = :id
-    ", ['id' => $categoryId]);
+    $categoryId = $validation['data']['id'];
 
-    if ($itemCount > 0) {
-        return [
-            'success' => false,
-            'error' => 'Kan ikke slette kategori med elementer. Flyt eller slet elementerne først.'
-        ];
-    }
+    return api_crud_delete(
+        'price_categories',
+        $categoryId,
+        function($category) {
+            // Check if category has items
+            $itemCount = db_value("
+                SELECT COUNT(*) FROM price_catalog_items WHERE category_id = :id
+            ", ['id' => $category['id']]);
 
-    db_begin_transaction();
-    try {
-        db_delete('price_categories', 'id = :id', ['id' => $categoryId]);
-
-        db_commit();
-
-        log_activity('price_category_deleted', 'price_category', $categoryId);
-
-        return [
-            'success' => true,
-            'message' => 'Kategori slettet'
-        ];
-
-    } catch (Exception $e) {
-        db_rollback();
-        return ['success' => false, 'error' => 'Kunne ikke slette kategori'];
-    }
+            if ($itemCount > 0) {
+                throw new Exception('Kan ikke slette kategori med elementer. Flyt eller slet elementerne først.');
+            }
+        },
+        function($id) {
+            log_activity('price_category_deleted', 'price_category', $id);
+        }
+    );
 }
 
 /**
@@ -191,45 +183,46 @@ function handle_delete_category(array $user): array {
  * POST ?module=price_catalog&action=reorder_categories
  */
 function handle_reorder_categories(array $user): array {
-    csrf_require();
+    $csrfCheck = api_require_csrf();
+    if (!$csrfCheck['success']) return $csrfCheck;
+
+    $validation = api_validate_params([
+        'parent_id' => ['int', 'POST', false, null]
+    ]);
+
+    if (!$validation['success']) {
+        return $validation;
+    }
 
     $categoryIds = $_POST['category_ids'] ?? [];
-    $parentId = isset($_POST['parent_id']) ? sanitize_int($_POST['parent_id']) : null;
+    $parentId = $validation['data']['parent_id'];
 
     if (!is_array($categoryIds)) {
-        return ['success' => false, 'error' => 'Kategori ID liste er påkrævet'];
+        return api_error('Kategori ID liste er påkrævet');
     }
 
-    db_begin_transaction();
-    try {
-        foreach ($categoryIds as $order => $categoryId) {
-            $categoryId = sanitize_int($categoryId);
-            $whereClause = 'id = :id AND parent_id ' . ($parentId ? '= :parent_id' : 'IS NULL');
-            $params = ['id' => $categoryId];
-            if ($parentId) {
-                $params['parent_id'] = $parentId;
+    return api_transaction(
+        function() use ($categoryIds, $parentId) {
+            foreach ($categoryIds as $order => $categoryId) {
+                $categoryId = sanitize_int($categoryId);
+                $whereClause = 'id = :id AND parent_id ' . ($parentId ? '= :parent_id' : 'IS NULL');
+                $params = ['id' => $categoryId];
+                if ($parentId) {
+                    $params['parent_id'] = $parentId;
+                }
+
+                db_update('price_categories',
+                    ['display_order' => $order + 1],
+                    $whereClause,
+                    $params
+                );
             }
 
-            db_update('price_categories',
-                ['display_order' => $order + 1],
-                $whereClause,
-                $params
-            );
-        }
-
-        db_commit();
-
-        log_activity('price_categories_reordered', 'system', 0);
-
-        return [
-            'success' => true,
-            'message' => 'Kategori rækkefølge opdateret'
-        ];
-
-    } catch (Exception $e) {
-        db_rollback();
-        return ['success' => false, 'error' => 'Kunne ikke opdatere rækkefølge'];
-    }
+            log_activity('price_categories_reordered', 'system', 0);
+        },
+        'Kategori rækkefølge opdateret',
+        'Kunne ikke opdatere rækkefølge'
+    );
 }
 
 /**
@@ -237,10 +230,18 @@ function handle_reorder_categories(array $user): array {
  * GET ?module=price_catalog&action=get_items&category_id=X
  */
 function handle_get_items(array $user): array {
-    $categoryId = isset($_GET['category_id']) ? sanitize_int($_GET['category_id']) : null;
-    $page = sanitize_int($_GET['page'] ?? 1);
-    $limit = sanitize_int($_GET['limit'] ?? 50);
-    $offset = ($page - 1) * $limit;
+    $validation = api_validate_params([
+        'category_id' => ['int', 'GET', false, null],
+        'page' => ['int', 'GET', false, 1],
+        'limit' => ['int', 'GET', false, 50]
+    ]);
+
+    if (!$validation['success']) {
+        return $validation;
+    }
+
+    $params = $validation['data'];
+    $offset = ($params['page'] - 1) * $params['limit'];
 
     $query = "
         SELECT
@@ -250,33 +251,33 @@ function handle_get_items(array $user): array {
         LEFT JOIN price_categories pc ON pc.id = pci.category_id
     ";
 
-    $params = ['limit' => $limit, 'offset' => $offset];
+    $queryParams = ['limit' => $params['limit'], 'offset' => $offset];
 
-    if ($categoryId !== null) {
+    if ($params['category_id'] !== null) {
         $query .= " WHERE pci.category_id = :category_id";
-        $params['category_id'] = $categoryId;
+        $queryParams['category_id'] = $params['category_id'];
     }
 
     $query .= " ORDER BY pci.display_order ASC, pci.item_code ASC
                 LIMIT :limit OFFSET :offset";
 
-    $items = db_fetch_all($query, $params);
+    $items = db_fetch_all($query, $queryParams);
 
     // Get total count
     $countQuery = "SELECT COUNT(*) FROM price_catalog_items";
-    if ($categoryId !== null) {
+    if ($params['category_id'] !== null) {
         $countQuery .= " WHERE category_id = :category_id";
     }
-    $totalCount = db_value($countQuery, $categoryId !== null ? ['category_id' => $categoryId] : []);
+    $totalCount = db_value($countQuery, $params['category_id'] !== null ? ['category_id' => $params['category_id']] : []);
 
     return [
         'success' => true,
         'items' => $items,
         'pagination' => [
             'total' => (int)$totalCount,
-            'page' => $page,
-            'limit' => $limit,
-            'pages' => ceil($totalCount / $limit)
+            'page' => $params['page'],
+            'limit' => $params['limit'],
+            'pages' => ceil($totalCount / $params['limit'])
         ]
     ];
 }
@@ -286,12 +287,20 @@ function handle_get_items(array $user): array {
  * GET ?module=price_catalog&action=search_items&query=X
  */
 function handle_search_items(array $user): array {
-    $searchQuery = sanitize_string($_GET['query'] ?? '');
-    $categoryId = isset($_GET['category_id']) ? sanitize_int($_GET['category_id']) : null;
-    $limit = sanitize_int($_GET['limit'] ?? 20);
+    $validation = api_validate_params([
+        'query' => ['string', 'GET', true],
+        'category_id' => ['int', 'GET', false, null],
+        'limit' => ['int', 'GET', false, 20]
+    ]);
 
-    if (strlen($searchQuery) < 2) {
-        return ['success' => false, 'error' => 'Søgeforespørgsel skal være mindst 2 tegn'];
+    if (!$validation['success']) {
+        return $validation;
+    }
+
+    $params = $validation['data'];
+
+    if (strlen($params['query']) < 2) {
+        return api_error('Søgeforespørgsel skal være mindst 2 tegn');
     }
 
     $query = "
@@ -307,11 +316,15 @@ function handle_search_items(array $user): array {
         )
     ";
 
-    $params = ['search' => '%' . $searchQuery . '%', 'limit' => $limit];
+    $queryParams = [
+        'search' => '%' . $params['query'] . '%',
+        'exact' => $params['query'] . '%',
+        'limit' => $params['limit']
+    ];
 
-    if ($categoryId !== null) {
+    if ($params['category_id'] !== null) {
         $query .= " AND pci.category_id = :category_id";
-        $params['category_id'] = $categoryId;
+        $queryParams['category_id'] = $params['category_id'];
     }
 
     $query .= " ORDER BY
@@ -323,9 +336,7 @@ function handle_search_items(array $user): array {
                     pci.item_code ASC
                 LIMIT :limit";
 
-    $params['exact'] = $searchQuery . '%';
-
-    $items = db_fetch_all($query, $params);
+    $items = db_fetch_all($query, $queryParams);
 
     return [
         'success' => true,
@@ -339,39 +350,39 @@ function handle_search_items(array $user): array {
  * GET ?module=price_catalog&action=get_item&id=X
  */
 function handle_get_item(array $user): array {
-    $itemId = sanitize_int($_GET['id'] ?? 0);
+    $validation = api_validate_params([
+        'id' => ['int', 'GET', true]
+    ]);
 
-    if (!$itemId) {
-        return ['success' => false, 'error' => 'Element ID mangler'];
+    if (!$validation['success']) {
+        return $validation;
     }
 
-    $item = db_fetch("
-        SELECT
+    $itemId = $validation['data']['id'];
+
+    return api_get_entity(
+        'price_catalog_items',
+        $itemId,
+        function($item) {
+            // Get price history
+            $priceHistory = db_fetch_all("
+                SELECT * FROM price_history
+                WHERE catalog_item_id = :item_id
+                ORDER BY effective_date DESC
+                LIMIT 10
+            ", ['item_id' => $item['id']]);
+
+            $item['price_history'] = $priceHistory;
+
+            return $item;
+        },
+        "SELECT
             pci.*,
             pc.name as category_name
         FROM price_catalog_items pci
         LEFT JOIN price_categories pc ON pc.id = pci.category_id
-        WHERE pci.id = :id
-    ", ['id' => $itemId]);
-
-    if (!$item) {
-        return ['success' => false, 'error' => 'Element ikke fundet'];
-    }
-
-    // Get price history
-    $priceHistory = db_fetch_all("
-        SELECT * FROM price_history
-        WHERE catalog_item_id = :item_id
-        ORDER BY effective_date DESC
-        LIMIT 10
-    ", ['item_id' => $itemId]);
-
-    $item['price_history'] = $priceHistory;
-
-    return [
-        'success' => true,
-        'item' => $item
-    ];
+        WHERE pci.id = :id"
+    );
 }
 
 /**
@@ -379,66 +390,65 @@ function handle_get_item(array $user): array {
  * POST ?module=price_catalog&action=create_item
  */
 function handle_create_item(array $user): array {
-    csrf_require();
+    $csrfCheck = api_require_csrf();
+    if (!$csrfCheck['success']) return $csrfCheck;
 
-    $categoryId = isset($_POST['category_id']) ? sanitize_int($_POST['category_id']) : null;
-    $itemCode = sanitize_string($_POST['item_code'] ?? '');
-    $name = sanitize_string($_POST['name'] ?? '');
-    $unit = sanitize_string($_POST['unit'] ?? 'stk');
-    $price = sanitize_float($_POST['price'] ?? 0);
+    $validation = api_validate_params([
+        'category_id' => ['int', 'POST', false, null],
+        'item_code' => ['string', 'POST', false, ''],
+        'name' => ['string', 'POST', true],
+        'description' => ['string', 'POST', false, ''],
+        'unit' => ['string', 'POST', false, 'stk'],
+        'price' => ['float', 'POST', false, 0]
+    ]);
 
-    if (!$name) {
-        return ['success' => false, 'error' => 'Navn er påkrævet'];
+    if (!$validation['success']) {
+        return $validation;
     }
 
-    db_begin_transaction();
-    try {
-        // Get next display order
-        $maxOrder = db_value("
-            SELECT COALESCE(MAX(display_order), 0)
-            FROM price_catalog_items
-            WHERE category_id " . ($categoryId ? "= :category_id" : "IS NULL"),
-            $categoryId ? ['category_id' => $categoryId] : []
-        );
+    $params = $validation['data'];
 
-        $itemData = [
-            'category_id' => $categoryId,
-            'item_code' => $itemCode,
-            'name' => $name,
-            'description' => sanitize_string($_POST['description'] ?? ''),
-            'unit' => $unit,
-            'price' => $price,
-            'display_order' => $maxOrder + 1,
-            'is_active' => true,
-            'created_at' => date('Y-m-d H:i:s'),
-            'updated_at' => date('Y-m-d H:i:s')
-        ];
+    return api_transaction(
+        function() use ($params, $user) {
+            // Get next display order
+            $maxOrder = db_value("
+                SELECT COALESCE(MAX(display_order), 0)
+                FROM price_catalog_items
+                WHERE category_id " . ($params['category_id'] ? "= :category_id" : "IS NULL"),
+                $params['category_id'] ? ['category_id' => $params['category_id']] : []
+            );
 
-        $itemId = db_insert('price_catalog_items', $itemData);
+            $itemData = [
+                'category_id' => $params['category_id'],
+                'item_code' => $params['item_code'],
+                'name' => $params['name'],
+                'description' => $params['description'],
+                'unit' => $params['unit'],
+                'price' => $params['price'],
+                'display_order' => $maxOrder + 1,
+                'is_active' => true,
+                'created_at' => date('Y-m-d H:i:s'),
+                'updated_at' => date('Y-m-d H:i:s')
+            ];
 
-        // Create price history entry
-        db_insert('price_history', [
-            'catalog_item_id' => $itemId,
-            'price' => $price,
-            'effective_date' => date('Y-m-d'),
-            'changed_by_user_id' => $user['id'],
-            'created_at' => date('Y-m-d H:i:s')
-        ]);
+            $itemId = db_insert('price_catalog_items', $itemData);
 
-        db_commit();
+            // Create price history entry
+            db_insert('price_history', [
+                'catalog_item_id' => $itemId,
+                'price' => $params['price'],
+                'effective_date' => date('Y-m-d'),
+                'changed_by_user_id' => $user['id'],
+                'created_at' => date('Y-m-d H:i:s')
+            ]);
 
-        log_activity('catalog_item_created', 'catalog_item', $itemId);
+            log_activity('catalog_item_created', 'catalog_item', $itemId);
 
-        return [
-            'success' => true,
-            'item_id' => $itemId,
-            'message' => 'Katalog element oprettet'
-        ];
-
-    } catch (Exception $e) {
-        db_rollback();
-        return ['success' => false, 'error' => 'Kunne ikke oprette element'];
-    }
+            return ['item_id' => $itemId];
+        },
+        'Katalog element oprettet',
+        'Kunne ikke oprette element'
+    );
 }
 
 /**
@@ -446,85 +456,82 @@ function handle_create_item(array $user): array {
  * POST ?module=price_catalog&action=update_item
  */
 function handle_update_item(array $user): array {
-    csrf_require();
+    $csrfCheck = api_require_csrf();
+    if (!$csrfCheck['success']) return $csrfCheck;
 
-    $itemId = sanitize_int($_POST['id'] ?? 0);
+    $validation = api_validate_params([
+        'id' => ['int', 'POST', true],
+        'category_id' => ['int', 'POST', false],
+        'item_code' => ['string', 'POST', false],
+        'name' => ['string', 'POST', false],
+        'description' => ['string', 'POST', false],
+        'unit' => ['string', 'POST', false],
+        'price' => ['float', 'POST', false],
+        'is_active' => ['bool', 'POST', false]
+    ]);
 
-    if (!$itemId) {
-        return ['success' => false, 'error' => 'Element ID mangler'];
+    if (!$validation['success']) {
+        return $validation;
     }
 
-    // Get current item
-    $currentItem = db_fetch("SELECT * FROM price_catalog_items WHERE id = :id", ['id' => $itemId]);
+    $params = $validation['data'];
+    $itemId = $params['id'];
 
-    if (!$currentItem) {
-        return ['success' => false, 'error' => 'Element ikke fundet'];
-    }
+    return api_transaction(
+        function() use ($itemId, $params, $user) {
+            // Get current item
+            $currentItem = db_fetch("SELECT * FROM price_catalog_items WHERE id = :id", ['id' => $itemId]);
 
-    db_begin_transaction();
-    try {
-        $updateData = ['updated_at' => date('Y-m-d H:i:s')];
-
-        if (isset($_POST['category_id'])) {
-            $updateData['category_id'] = isset($_POST['category_id']) && $_POST['category_id'] !== ''
-                ? sanitize_int($_POST['category_id'])
-                : null;
-        }
-
-        if (isset($_POST['item_code'])) {
-            $updateData['item_code'] = sanitize_string($_POST['item_code']);
-        }
-
-        if (isset($_POST['name'])) {
-            $updateData['name'] = sanitize_string($_POST['name']);
-        }
-
-        if (isset($_POST['description'])) {
-            $updateData['description'] = sanitize_string($_POST['description']);
-        }
-
-        if (isset($_POST['unit'])) {
-            $updateData['unit'] = sanitize_string($_POST['unit']);
-        }
-
-        if (isset($_POST['price'])) {
-            $newPrice = sanitize_float($_POST['price']);
-
-            // If price changed, create price history entry
-            if ($newPrice != $currentItem['price']) {
-                db_insert('price_history', [
-                    'catalog_item_id' => $itemId,
-                    'price' => $newPrice,
-                    'effective_date' => date('Y-m-d'),
-                    'changed_by_user_id' => $user['id'],
-                    'created_at' => date('Y-m-d H:i:s')
-                ]);
+            if (!$currentItem) {
+                throw new Exception('Element ikke fundet');
             }
 
-            $updateData['price'] = $newPrice;
-        }
+            $updateData = ['updated_at' => date('Y-m-d H:i:s')];
 
-        if (isset($_POST['is_active'])) {
-            $updateData['is_active'] = (bool)$_POST['is_active'];
-        }
+            if (isset($params['category_id'])) {
+                $updateData['category_id'] = $params['category_id'] !== '' ? $params['category_id'] : null;
+            }
+            if (isset($params['item_code'])) {
+                $updateData['item_code'] = $params['item_code'];
+            }
+            if (isset($params['name'])) {
+                $updateData['name'] = $params['name'];
+            }
+            if (isset($params['description'])) {
+                $updateData['description'] = $params['description'];
+            }
+            if (isset($params['unit'])) {
+                $updateData['unit'] = $params['unit'];
+            }
+            if (isset($params['price'])) {
+                $newPrice = $params['price'];
 
-        if (!empty($updateData)) {
-            db_update('price_catalog_items', $updateData, 'id = :id', ['id' => $itemId]);
-        }
+                // If price changed, create price history entry
+                if ($newPrice != $currentItem['price']) {
+                    db_insert('price_history', [
+                        'catalog_item_id' => $itemId,
+                        'price' => $newPrice,
+                        'effective_date' => date('Y-m-d'),
+                        'changed_by_user_id' => $user['id'],
+                        'created_at' => date('Y-m-d H:i:s')
+                    ]);
+                }
 
-        db_commit();
+                $updateData['price'] = $newPrice;
+            }
+            if (isset($params['is_active'])) {
+                $updateData['is_active'] = $params['is_active'];
+            }
 
-        log_activity('catalog_item_updated', 'catalog_item', $itemId);
+            if (count($updateData) > 1) { // More than just updated_at
+                db_update('price_catalog_items', $updateData, 'id = :id', ['id' => $itemId]);
+            }
 
-        return [
-            'success' => true,
-            'message' => 'Element opdateret'
-        ];
-
-    } catch (Exception $e) {
-        db_rollback();
-        return ['success' => false, 'error' => 'Kunne ikke opdatere element'];
-    }
+            log_activity('catalog_item_updated', 'catalog_item', $itemId);
+        },
+        'Element opdateret',
+        'Kunne ikke opdatere element'
+    );
 }
 
 /**
@@ -532,35 +539,32 @@ function handle_update_item(array $user): array {
  * POST ?module=price_catalog&action=delete_item
  */
 function handle_delete_item(array $user): array {
-    csrf_require();
+    $csrfCheck = api_require_csrf();
+    if (!$csrfCheck['success']) return $csrfCheck;
 
-    $itemId = sanitize_int($_POST['id'] ?? 0);
+    $validation = api_validate_params([
+        'id' => ['int', 'POST', true]
+    ]);
 
-    if (!$itemId) {
-        return ['success' => false, 'error' => 'Element ID mangler'];
+    if (!$validation['success']) {
+        return $validation;
     }
 
-    db_begin_transaction();
-    try {
-        // Delete price history
-        db_execute("DELETE FROM price_history WHERE catalog_item_id = :id", ['id' => $itemId]);
+    $itemId = $validation['data']['id'];
 
-        // Delete item
-        db_delete('price_catalog_items', 'id = :id', ['id' => $itemId]);
+    return api_transaction(
+        function() use ($itemId) {
+            // Delete price history
+            db_execute("DELETE FROM price_history WHERE catalog_item_id = :id", ['id' => $itemId]);
 
-        db_commit();
+            // Delete item
+            db_delete('price_catalog_items', 'id = :id', ['id' => $itemId]);
 
-        log_activity('catalog_item_deleted', 'catalog_item', $itemId);
-
-        return [
-            'success' => true,
-            'message' => 'Element slettet'
-        ];
-
-    } catch (Exception $e) {
-        db_rollback();
-        return ['success' => false, 'error' => 'Kunne ikke slette element'];
-    }
+            log_activity('catalog_item_deleted', 'catalog_item', $itemId);
+        },
+        'Element slettet',
+        'Kunne ikke slette element'
+    );
 }
 
 /**
@@ -568,45 +572,46 @@ function handle_delete_item(array $user): array {
  * POST ?module=price_catalog&action=reorder_items
  */
 function handle_reorder_items(array $user): array {
-    csrf_require();
+    $csrfCheck = api_require_csrf();
+    if (!$csrfCheck['success']) return $csrfCheck;
+
+    $validation = api_validate_params([
+        'category_id' => ['int', 'POST', false, null]
+    ]);
+
+    if (!$validation['success']) {
+        return $validation;
+    }
 
     $itemIds = $_POST['item_ids'] ?? [];
-    $categoryId = isset($_POST['category_id']) ? sanitize_int($_POST['category_id']) : null;
+    $categoryId = $validation['data']['category_id'];
 
     if (!is_array($itemIds)) {
-        return ['success' => false, 'error' => 'Element ID liste er påkrævet'];
+        return api_error('Element ID liste er påkrævet');
     }
 
-    db_begin_transaction();
-    try {
-        foreach ($itemIds as $order => $itemId) {
-            $itemId = sanitize_int($itemId);
-            $whereClause = 'id = :id AND category_id ' . ($categoryId ? '= :category_id' : 'IS NULL');
-            $params = ['id' => $itemId];
-            if ($categoryId) {
-                $params['category_id'] = $categoryId;
+    return api_transaction(
+        function() use ($itemIds, $categoryId) {
+            foreach ($itemIds as $order => $itemId) {
+                $itemId = sanitize_int($itemId);
+                $whereClause = 'id = :id AND category_id ' . ($categoryId ? '= :category_id' : 'IS NULL');
+                $params = ['id' => $itemId];
+                if ($categoryId) {
+                    $params['category_id'] = $categoryId;
+                }
+
+                db_update('price_catalog_items',
+                    ['display_order' => $order + 1],
+                    $whereClause,
+                    $params
+                );
             }
 
-            db_update('price_catalog_items',
-                ['display_order' => $order + 1],
-                $whereClause,
-                $params
-            );
-        }
-
-        db_commit();
-
-        log_activity('catalog_items_reordered', 'system', 0);
-
-        return [
-            'success' => true,
-            'message' => 'Element rækkefølge opdateret'
-        ];
-
-    } catch (Exception $e) {
-        db_rollback();
-        return ['success' => false, 'error' => 'Kunne ikke opdatere rækkefølge'];
-    }
+            log_activity('catalog_items_reordered', 'system', 0);
+        },
+        'Element rækkefølge opdateret',
+        'Kunne ikke opdatere rækkefølge'
+    );
 }
 
 /**
@@ -614,11 +619,15 @@ function handle_reorder_items(array $user): array {
  * GET ?module=price_catalog&action=get_price_history&item_id=X
  */
 function handle_get_price_history(array $user): array {
-    $itemId = sanitize_int($_GET['item_id'] ?? 0);
+    $validation = api_validate_params([
+        'item_id' => ['int', 'GET', true]
+    ]);
 
-    if (!$itemId) {
-        return ['success' => false, 'error' => 'Element ID mangler'];
+    if (!$validation['success']) {
+        return $validation;
     }
+
+    $itemId = $validation['data']['item_id'];
 
     $history = db_fetch_all("
         SELECT
@@ -641,109 +650,108 @@ function handle_get_price_history(array $user): array {
  * POST ?module=price_catalog&action=import_catalog
  */
 function handle_import_catalog(array $user): array {
-    csrf_require();
+    $csrfCheck = api_require_csrf();
+    if (!$csrfCheck['success']) return $csrfCheck;
 
     if (!isset($_FILES['file']) || $_FILES['file']['error'] !== UPLOAD_ERR_OK) {
-        return ['success' => false, 'error' => 'Ingen fil uploadet'];
+        return api_error('Ingen fil uploadet');
     }
 
     $file = $_FILES['file'];
 
     // Validate file type
     if (pathinfo($file['name'], PATHINFO_EXTENSION) !== 'csv') {
-        return ['success' => false, 'error' => 'Kun CSV filer er tilladt'];
+        return api_error('Kun CSV filer er tilladt');
     }
 
-    db_begin_transaction();
-    try {
-        $handle = fopen($file['tmp_name'], 'r');
-        if (!$handle) {
-            throw new Exception('Kunne ikke åbne fil');
-        }
-
-        // Skip header row
-        fgetcsv($handle);
-
-        $imported = 0;
-        $errors = [];
-
-        while (($data = fgetcsv($handle)) !== FALSE) {
-            try {
-                // Expected format: category_name, item_code, name, description, unit, price
-                $categoryName = trim($data[0] ?? '');
-                $itemCode = trim($data[1] ?? '');
-                $name = trim($data[2] ?? '');
-                $description = trim($data[3] ?? '');
-                $unit = trim($data[4] ?? 'stk');
-                $price = floatval($data[5] ?? 0);
-
-                if (empty($name)) {
-                    continue;
-                }
-
-                // Find or create category
-                $categoryId = null;
-                if (!empty($categoryName)) {
-                    $category = db_fetch("
-                        SELECT id FROM price_categories WHERE name = :name
-                    ", ['name' => $categoryName]);
-
-                    if (!$category) {
-                        $categoryId = db_insert('price_categories', [
-                            'name' => $categoryName,
-                            'display_order' => 999,
-                            'created_at' => date('Y-m-d H:i:s')
-                        ]);
-                    } else {
-                        $categoryId = $category['id'];
-                    }
-                }
-
-                // Create item
-                $itemId = db_insert('price_catalog_items', [
-                    'category_id' => $categoryId,
-                    'item_code' => $itemCode,
-                    'name' => $name,
-                    'description' => $description,
-                    'unit' => $unit,
-                    'price' => $price,
-                    'is_active' => true,
-                    'created_at' => date('Y-m-d H:i:s'),
-                    'updated_at' => date('Y-m-d H:i:s')
-                ]);
-
-                // Create price history
-                db_insert('price_history', [
-                    'catalog_item_id' => $itemId,
-                    'price' => $price,
-                    'effective_date' => date('Y-m-d'),
-                    'changed_by_user_id' => $user['id'],
-                    'created_at' => date('Y-m-d H:i:s')
-                ]);
-
-                $imported++;
-
-            } catch (Exception $e) {
-                $errors[] = "Linje " . ($imported + 2) . ": " . $e->getMessage();
+    return api_transaction(
+        function() use ($file, $user) {
+            $handle = fopen($file['tmp_name'], 'r');
+            if (!$handle) {
+                throw new Exception('Kunne ikke åbne fil');
             }
-        }
 
-        fclose($handle);
-        db_commit();
+            // Skip header row
+            fgetcsv($handle);
 
-        log_activity('catalog_imported', 'system', 0);
+            $imported = 0;
+            $errors = [];
 
-        return [
-            'success' => true,
-            'imported' => $imported,
-            'errors' => $errors,
-            'message' => "$imported elementer importeret" . (empty($errors) ? '' : ' med ' . count($errors) . ' fejl')
-        ];
+            while (($data = fgetcsv($handle)) !== FALSE) {
+                try {
+                    // Expected format: category_name, item_code, name, description, unit, price
+                    $categoryName = trim($data[0] ?? '');
+                    $itemCode = trim($data[1] ?? '');
+                    $name = trim($data[2] ?? '');
+                    $description = trim($data[3] ?? '');
+                    $unit = trim($data[4] ?? 'stk');
+                    $price = floatval($data[5] ?? 0);
 
-    } catch (Exception $e) {
-        db_rollback();
-        return ['success' => false, 'error' => 'Import fejlede: ' . $e->getMessage()];
-    }
+                    if (empty($name)) {
+                        continue;
+                    }
+
+                    // Find or create category
+                    $categoryId = null;
+                    if (!empty($categoryName)) {
+                        $category = db_fetch("
+                            SELECT id FROM price_categories WHERE name = :name
+                        ", ['name' => $categoryName]);
+
+                        if (!$category) {
+                            $categoryId = db_insert('price_categories', [
+                                'name' => $categoryName,
+                                'display_order' => 999,
+                                'created_at' => date('Y-m-d H:i:s')
+                            ]);
+                        } else {
+                            $categoryId = $category['id'];
+                        }
+                    }
+
+                    // Create item
+                    $itemId = db_insert('price_catalog_items', [
+                        'category_id' => $categoryId,
+                        'item_code' => $itemCode,
+                        'name' => $name,
+                        'description' => $description,
+                        'unit' => $unit,
+                        'price' => $price,
+                        'is_active' => true,
+                        'created_at' => date('Y-m-d H:i:s'),
+                        'updated_at' => date('Y-m-d H:i:s')
+                    ]);
+
+                    // Create price history
+                    db_insert('price_history', [
+                        'catalog_item_id' => $itemId,
+                        'price' => $price,
+                        'effective_date' => date('Y-m-d'),
+                        'changed_by_user_id' => $user['id'],
+                        'created_at' => date('Y-m-d H:i:s')
+                    ]);
+
+                    $imported++;
+
+                } catch (Exception $e) {
+                    $errors[] = "Linje " . ($imported + 2) . ": " . $e->getMessage();
+                }
+            }
+
+            fclose($handle);
+
+            log_activity('catalog_imported', 'system', 0);
+
+            return [
+                'imported' => $imported,
+                'errors' => $errors
+            ];
+        },
+        function($result) {
+            return $result['imported'] . ' elementer importeret' . (empty($result['errors']) ? '' : ' med ' . count($result['errors']) . ' fejl');
+        },
+        'Import fejlede'
+    );
 }
 
 /**
