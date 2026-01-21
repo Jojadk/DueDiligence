@@ -438,12 +438,18 @@ function render_template(string $template, array $data): string {
     // Handle red_flags_display function
     $rendered = handle_red_flags_display($rendered);
 
+    // Handle ternary operators BEFORE pipe filters
+    $rendered = handle_ternary_operators($rendered, $data);
+
+    // Handle nullish coalescing BEFORE pipe filters
+    $rendered = handle_nullish_coalescing($rendered, $data);
+
     // Handle pipe filters BEFORE replacing simple variables
     $rendered = handle_pipe_filters($rendered, $data);
 
-    // Replace simple variables (without filters)
+    // Replace simple variables (without filters) with safe fallback
     foreach ($data['project'] as $key => $value) {
-        $rendered = str_replace("{{project.$key}}", htmlspecialchars((string)$value), $rendered);
+        $rendered = str_replace("{{project.$key}}", htmlspecialchars((string)($value ?? '')), $rendered);
     }
 
     // Legacy formatting functions (keep for backwards compatibility)
@@ -466,21 +472,94 @@ function handle_loop(string $template, string $loopName, array $items): string {
         foreach ($items as $item) {
             $itemOutput = $loopTemplate;
 
+            // Handle ternary operators inside loop
+            $itemOutput = handle_loop_ternary($itemOutput, $itemVar, $item);
+
+            // Handle nullish coalescing inside loop
+            $itemOutput = handle_loop_nullish($itemOutput, $itemVar, $item);
+
             // Handle pipe filters inside loop
             $itemOutput = handle_loop_pipe_filters($itemOutput, $itemVar, $item);
 
-            // Handle red_flags_display inside loop
+            // Handle red_flags_display inside loop with (red) highlighting
+            $itemOutput = preg_replace_callback(
+                '/\{\{' . preg_quote($itemVar) . '\.flags\s*\(([^)]+)\)\}\}/',
+                function($m) use ($item) {
+                    $highlightColor = trim($m[1]);
+                    return generate_red_flags_display($item, $highlightColor);
+                },
+                $itemOutput
+            );
+
+            // Handle red_flags_display inside loop (legacy)
             $itemOutput = str_replace("{{REDFLAG_DISPLAY:$itemVar}}", generate_red_flags_display($item), $itemOutput);
 
-            // Replace simple variables
+            // Replace simple variables with safe fallback
             foreach ($item as $key => $value) {
-                $itemOutput = str_replace("{{{$itemVar}.$key}}", htmlspecialchars((string)$value), $itemOutput);
+                $itemOutput = str_replace("{{{$itemVar}.$key}}", htmlspecialchars((string)($value ?? '')), $itemOutput);
             }
 
             $output .= $itemOutput;
         }
 
         return $output;
+    }, $template);
+}
+
+/**
+ * Helper: Handle nullish coalescing inside loops
+ */
+function handle_loop_nullish(string $template, string $itemVar, array $item): string {
+    // Match {{itemVar.field??default}}
+    $pattern = '/\{\{' . preg_quote($itemVar) . '\.([a-z_]+)\?\?([^}]+)\}\}/i';
+
+    return preg_replace_callback($pattern, function($matches) use ($item) {
+        $field = $matches[1];
+        $default = trim($matches[2]);
+
+        $value = $item[$field] ?? null;
+
+        if ($value === null || $value === '' || $value === false) {
+            return htmlspecialchars($default);
+        }
+
+        return htmlspecialchars((string)$value);
+    }, $template);
+}
+
+/**
+ * Helper: Handle ternary operators inside loops
+ */
+function handle_loop_ternary(string $template, string $itemVar, array $item): string {
+    // Match {{itemVar.field?true:false}} or {{itemVar.field > 0?Yes:No}}
+    $pattern = '/\{\{' . preg_quote($itemVar) . '\.([a-z_]+)\s*([><=!]+)?\s*(\d+)?\?([^:}]+):([^}]+)\}\}/i';
+
+    return preg_replace_callback($pattern, function($matches) use ($item) {
+        $field = $matches[1];
+        $operator = $matches[2] ?? null;
+        $compareValue = $matches[3] ?? null;
+        $trueValue = trim($matches[4]);
+        $falseValue = trim($matches[5]);
+
+        $value = $item[$field] ?? null;
+
+        if ($operator && $compareValue !== null) {
+            // Comparison
+            $result = false;
+            switch ($operator) {
+                case '>': $result = $value > $compareValue; break;
+                case '<': $result = $value < $compareValue; break;
+                case '>=': $result = $value >= $compareValue; break;
+                case '<=': $result = $value <= $compareValue; break;
+                case '==': $result = $value == $compareValue; break;
+                case '!=': $result = $value != $compareValue; break;
+            }
+        } else {
+            // Simple truthy check
+            $result = !empty($value);
+        }
+
+        return htmlspecialchars($result ? $trueValue : $falseValue);
     }, $template);
 }
 
@@ -503,15 +582,17 @@ function handle_loop_pipe_filters(string $template, string $itemVar, array $item
 
 /**
  * Helper: Generate red flags display HTML
+ * @param array $item Element data with red_flag_score
+ * @param string|null $highlightColor Color name to highlight (e.g., 'red', 'orange', 'yellow')
  */
-function generate_red_flags_display(array $item): string {
+function generate_red_flags_display(array $item, ?string $highlightColor = null): string {
     // Define all 5 flag types
     $allFlags = [
-        1 => ['label' => 'Kritisk', 'color' => '#DC2626', 'icon' => '🚩'],
-        2 => ['label' => 'Alvorlig', 'color' => '#F97316', 'icon' => '⚠️'],
-        3 => ['label' => 'Moderat', 'color' => '#FBBF24', 'icon' => '⚡'],
-        4 => ['label' => 'Mindre', 'color' => '#10B981', 'icon' => 'ℹ️'],
-        5 => ['label' => 'Info', 'color' => '#3B82F6', 'icon' => '💡']
+        1 => ['label' => 'Kritisk', 'color' => '#DC2626', 'icon' => '🚩', 'name' => 'red'],
+        2 => ['label' => 'Alvorlig', 'color' => '#F97316', 'icon' => '⚠️', 'name' => 'orange'],
+        3 => ['label' => 'Moderat', 'color' => '#FBBF24', 'icon' => '⚡', 'name' => 'yellow'],
+        4 => ['label' => 'Mindre', 'color' => '#10B981', 'icon' => 'ℹ️', 'name' => 'green'],
+        5 => ['label' => 'Info', 'color' => '#3B82F6', 'icon' => '💡', 'name' => 'blue']
     ];
 
     // Get element's red flag score (1-5)
@@ -520,9 +601,24 @@ function generate_red_flags_display(array $item): string {
     $html = '<span class="red-flags-display" style="display: inline-flex; gap: 4px;">';
 
     foreach ($allFlags as $flagValue => $flag) {
+        // Check if this flag is active (selected score) OR if we're highlighting this color
         $isActive = ($flagValue == $score);
-        $opacity = $isActive ? '1' : '0.2';
-        $border = $isActive ? '2px solid ' . $flag['color'] : '1px solid #e5e7eb';
+        $isHighlighted = ($highlightColor && $flag['name'] === strtolower($highlightColor));
+
+        // Special highlighting for requested color
+        if ($isHighlighted) {
+            $opacity = '1';
+            $border = '3px solid ' . $flag['color'];
+            $background = $flag['color'] . '30';
+        } elseif ($isActive) {
+            $opacity = '1';
+            $border = '2px solid ' . $flag['color'];
+            $background = $flag['color'] . '20';
+        } else {
+            $opacity = '0.2';
+            $border = '1px solid #e5e7eb';
+            $background = '#f9fafb';
+        }
 
         $html .= sprintf(
             '<span class="flag-badge" style="display: inline-flex; align-items: center; gap: 2px; padding: 2px 6px; border: %s; border-radius: 4px; opacity: %s; background: %s; font-size: 12px;">
@@ -531,10 +627,10 @@ function generate_red_flags_display(array $item): string {
             </span>',
             $border,
             $opacity,
-            $isActive ? $flag['color'] . '20' : '#f9fafb',
+            $background,
             $flag['icon'],
             $flag['color'],
-            $isActive ? 'bold' : 'normal',
+            ($isActive || $isHighlighted) ? 'bold' : 'normal',
             $flag['label']
         );
     }
@@ -599,6 +695,72 @@ function evaluate_condition(string $condition, array $data): bool {
 }
 
 /**
+ * Helper: Handle nullish coalescing operator ({{variable??default}})
+ */
+function handle_nullish_coalescing(string $template, array $data): string {
+    // Match {{variable??default}} - returns default if variable is null/undefined/empty
+    $pattern = '/\{\{([a-z_]+\.[a-z_]+)\?\?([^}]+)\}\}/i';
+
+    return preg_replace_callback($pattern, function($matches) use ($data) {
+        $variable = $matches[1]; // e.g., "project.description"
+        $default = trim($matches[2]); // e.g., "0" or "N/A"
+
+        // Get variable value safely
+        $parts = explode('.', $variable);
+        $value = $data[$parts[0]][$parts[1]] ?? null;
+
+        // Return default if value is null, empty string, or not set
+        if ($value === null || $value === '' || $value === false) {
+            return htmlspecialchars($default);
+        }
+
+        return htmlspecialchars((string)$value);
+    }, $template);
+}
+
+/**
+ * Helper: Handle ternary operators ({{variable?true:false}})
+ */
+function handle_ternary_operators(string $template, array $data): string {
+    // Match {{variable?trueValue:falseValue}} or {{variable > 0?Yes:No}}
+    $pattern = '/\{\{([^?}]+)\?([^:}]+):([^}]+)\}\}/';
+
+    return preg_replace_callback($pattern, function($matches) use ($data) {
+        $condition = trim($matches[1]); // e.g., "project.critical_count > 0" or "project.name"
+        $trueValue = trim($matches[2]);
+        $falseValue = trim($matches[3]);
+
+        // Check if condition contains comparison operator
+        if (preg_match('/([a-z_]+\.[a-z_]+)\s*([><=!]+)\s*(\d+)/i', $condition, $condMatches)) {
+            // Complex condition like "project.critical_count > 0"
+            $variable = $condMatches[1];
+            $operator = $condMatches[2];
+            $compareValue = $condMatches[3];
+
+            $parts = explode('.', $variable);
+            $actualValue = $data[$parts[0]][$parts[1]] ?? 0;
+
+            $result = false;
+            switch ($operator) {
+                case '>': $result = $actualValue > $compareValue; break;
+                case '<': $result = $actualValue < $compareValue; break;
+                case '>=': $result = $actualValue >= $compareValue; break;
+                case '<=': $result = $actualValue <= $compareValue; break;
+                case '==': $result = $actualValue == $compareValue; break;
+                case '!=': $result = $actualValue != $compareValue; break;
+            }
+        } else {
+            // Simple truthy check like "project.name"
+            $parts = explode('.', $condition);
+            $value = $data[$parts[0]][$parts[1]] ?? null;
+            $result = !empty($value);
+        }
+
+        return htmlspecialchars($result ? $trueValue : $falseValue);
+    }, $template);
+}
+
+/**
  * Helper: Handle pipe filters ({{variable | filter}})
  */
 function handle_pipe_filters(string $template, array $data): string {
@@ -610,7 +772,7 @@ function handle_pipe_filters(string $template, array $data): string {
         $filter = $matches[2];   // e.g., "uppercase"
         $param = $matches[3] ?? null; // e.g., "100" for truncate:100
 
-        // Get variable value
+        // Get variable value safely with fallback
         $parts = explode('.', $variable);
         $value = $data[$parts[0]][$parts[1]] ?? '';
 
