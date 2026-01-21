@@ -27,7 +27,6 @@
  */
 
 require_once __DIR__ . '/../../core/permissions.php';
-require_once __DIR__ . '/../../core/api-helpers.php';
 
 /**
  * Get all templates
@@ -68,16 +67,18 @@ function handle_get_templates(array $user): array {
  * GET ?module=template&action=get_template&id=X
  */
 function handle_get_template(array $user): array {
-    $validation = api_validate_params(['id' => 'required|int'], $_GET);
-    if (!$validation['success']) return $validation;
-    $templateId = $validation['params']['id'];
+    $templateId = sanitize_int($_GET['id'] ?? 0);
+
+    if (!$templateId) {
+        return ['success' => false, 'error' => 'Template ID mangler'];
+    }
 
     $template = db_fetch("
         SELECT * FROM budget_templates WHERE id = :id
     ", ['id' => $templateId]);
 
     if (!$template) {
-        return api_error('Template ikke fundet');
+        return ['success' => false, 'error' => 'Template ikke fundet'];
     }
 
     // Get template items
@@ -107,28 +108,27 @@ function handle_get_template(array $user): array {
  * POST ?module=template&action=create_template
  */
 function handle_create_template(array $user): array {
-    $csrfCheck = api_require_csrf();
-    if (!$csrfCheck['success']) return $csrfCheck;
+    csrf_require();
 
-    $validation = api_validate_params([
-        'name' => 'required',
-        'budget_type' => 'required',
-        'description' => 'optional',
-        'category' => 'optional'
-    ], $_POST);
-    if (!$validation['success']) return $validation;
-    $params = $validation['params'];
+    $name = sanitize_string($_POST['name'] ?? '');
+    $budgetType = sanitize_string($_POST['budget_type'] ?? 'capex');
+    $category = sanitize_string($_POST['category'] ?? '');
 
-    if (!in_array($params['budget_type'], ['capex', 'opex', 'reinstatement'])) {
-        return api_error('Ugyldig budget type');
+    if (!$name) {
+        return ['success' => false, 'error' => 'Navn er påkrævet'];
     }
 
-    return api_transaction(function() use ($user, $params) {
+    if (!in_array($budgetType, ['capex', 'opex', 'reinstatement'])) {
+        return ['success' => false, 'error' => 'Ugyldig budget type'];
+    }
+
+    db_begin_transaction();
+    try {
         $templateData = [
-            'name' => $params['name'],
-            'description' => $params['description'] ?? '',
-            'budget_type' => $params['budget_type'],
-            'category' => $params['category'] ?? '',
+            'name' => $name,
+            'description' => sanitize_string($_POST['description'] ?? ''),
+            'budget_type' => $budgetType,
+            'category' => $category,
             'is_active' => true,
             'created_by_user_id' => $user['id'],
             'created_at' => date('Y-m-d H:i:s'),
@@ -137,6 +137,8 @@ function handle_create_template(array $user): array {
 
         $templateId = db_insert('budget_templates', $templateData);
 
+        db_commit();
+
         log_activity('template_created', 'template', $templateId);
 
         return [
@@ -144,7 +146,11 @@ function handle_create_template(array $user): array {
             'template_id' => $templateId,
             'message' => 'Template oprettet'
         ];
-    }, 'Kunne ikke oprette template');
+
+    } catch (Exception $e) {
+        db_rollback();
+        return ['success' => false, 'error' => 'Kunne ikke oprette template'];
+    }
 }
 
 /**
@@ -152,14 +158,16 @@ function handle_create_template(array $user): array {
  * POST ?module=template&action=update_template
  */
 function handle_update_template(array $user): array {
-    $csrfCheck = api_require_csrf();
-    if (!$csrfCheck['success']) return $csrfCheck;
+    csrf_require();
 
-    $validation = api_validate_params(['id' => 'required|int'], $_POST);
-    if (!$validation['success']) return $validation;
-    $templateId = $validation['params']['id'];
+    $templateId = sanitize_int($_POST['id'] ?? 0);
 
-    return api_transaction(function() use ($templateId) {
+    if (!$templateId) {
+        return ['success' => false, 'error' => 'Template ID mangler'];
+    }
+
+    db_begin_transaction();
+    try {
         $updateData = ['updated_at' => date('Y-m-d H:i:s')];
 
         if (isset($_POST['name'])) {
@@ -182,13 +190,19 @@ function handle_update_template(array $user): array {
             db_update('budget_templates', $updateData, 'id = :id', ['id' => $templateId]);
         }
 
+        db_commit();
+
         log_activity('template_updated', 'template', $templateId);
 
         return [
             'success' => true,
             'message' => 'Template opdateret'
         ];
-    }, 'Kunne ikke opdatere template');
+
+    } catch (Exception $e) {
+        db_rollback();
+        return ['success' => false, 'error' => 'Kunne ikke opdatere template'];
+    }
 }
 
 /**
@@ -196,19 +210,23 @@ function handle_update_template(array $user): array {
  * POST ?module=template&action=delete_template
  */
 function handle_delete_template(array $user): array {
-    $csrfCheck = api_require_csrf();
-    if (!$csrfCheck['success']) return $csrfCheck;
+    csrf_require();
 
-    $validation = api_validate_params(['id' => 'required|int'], $_POST);
-    if (!$validation['success']) return $validation;
-    $templateId = $validation['params']['id'];
+    $templateId = sanitize_int($_POST['id'] ?? 0);
 
-    return api_transaction(function() use ($templateId) {
+    if (!$templateId) {
+        return ['success' => false, 'error' => 'Template ID mangler'];
+    }
+
+    db_begin_transaction();
+    try {
         // Delete template items
         db_execute("DELETE FROM budget_template_items WHERE template_id = :id", ['id' => $templateId]);
 
         // Delete template
         db_delete('budget_templates', 'id = :id', ['id' => $templateId]);
+
+        db_commit();
 
         log_activity('template_deleted', 'template', $templateId);
 
@@ -216,7 +234,11 @@ function handle_delete_template(array $user): array {
             'success' => true,
             'message' => 'Template slettet'
         ];
-    }, 'Kunne ikke slette template');
+
+    } catch (Exception $e) {
+        db_rollback();
+        return ['success' => false, 'error' => 'Kunne ikke slette template'];
+    }
 }
 
 /**
@@ -224,27 +246,27 @@ function handle_delete_template(array $user): array {
  * POST ?module=template&action=duplicate_template
  */
 function handle_duplicate_template(array $user): array {
-    $csrfCheck = api_require_csrf();
-    if (!$csrfCheck['success']) return $csrfCheck;
+    csrf_require();
 
-    $validation = api_validate_params([
-        'id' => 'required|int',
-        'new_name' => 'optional'
-    ], $_POST);
-    if (!$validation['success']) return $validation;
-    $params = $validation['params'];
+    $templateId = sanitize_int($_POST['id'] ?? 0);
+    $newName = sanitize_string($_POST['new_name'] ?? '');
 
-    // Get original template
-    $original = db_fetch("SELECT * FROM budget_templates WHERE id = :id", ['id' => $params['id']]);
-
-    if (!$original) {
-        return api_error('Template ikke fundet');
+    if (!$templateId) {
+        return ['success' => false, 'error' => 'Template ID mangler'];
     }
 
-    return api_transaction(function() use ($user, $params, $original) {
+    // Get original template
+    $original = db_fetch("SELECT * FROM budget_templates WHERE id = :id", ['id' => $templateId]);
+
+    if (!$original) {
+        return ['success' => false, 'error' => 'Template ikke fundet'];
+    }
+
+    db_begin_transaction();
+    try {
         // Create new template
         $newTemplateData = [
-            'name' => $params['new_name'] ?? ($original['name'] . ' (Kopi)'),
+            'name' => $newName ?: ($original['name'] . ' (Kopi)'),
             'description' => $original['description'],
             'budget_type' => $original['budget_type'],
             'category' => $original['category'],
@@ -259,7 +281,7 @@ function handle_duplicate_template(array $user): array {
         // Copy items
         $items = db_fetch_all("
             SELECT * FROM budget_template_items WHERE template_id = :template_id
-        ", ['template_id' => $params['id']]);
+        ", ['template_id' => $templateId]);
 
         foreach ($items as $item) {
             db_insert('budget_template_items', [
@@ -274,6 +296,8 @@ function handle_duplicate_template(array $user): array {
             ]);
         }
 
+        db_commit();
+
         log_activity('template_duplicated', 'template', $newTemplateId);
 
         return [
@@ -281,7 +305,11 @@ function handle_duplicate_template(array $user): array {
             'template_id' => $newTemplateId,
             'message' => 'Template kopieret'
         ];
-    }, 'Kunne ikke kopiere template');
+
+    } catch (Exception $e) {
+        db_rollback();
+        return ['success' => false, 'error' => 'Kunne ikke kopiere template'];
+    }
 }
 
 /**
@@ -289,37 +317,35 @@ function handle_duplicate_template(array $user): array {
  * POST ?module=template&action=add_item
  */
 function handle_add_item(array $user): array {
-    $csrfCheck = api_require_csrf();
-    if (!$csrfCheck['success']) return $csrfCheck;
+    csrf_require();
 
-    $validation = api_validate_params([
-        'template_id' => 'required|int',
-        'description' => 'required',
-        'quantity' => 'optional|float',
-        'unit' => 'optional',
-        'price_per_unit' => 'optional|float',
-        'timeline' => 'optional',
-        'notes' => 'optional'
-    ], $_POST);
-    if (!$validation['success']) return $validation;
-    $params = $validation['params'];
+    $templateId = sanitize_int($_POST['template_id'] ?? 0);
+    $description = sanitize_string($_POST['description'] ?? '');
+    $quantity = sanitize_float($_POST['quantity'] ?? 1);
+    $unit = sanitize_string($_POST['unit'] ?? 'stk');
+    $pricePerUnit = sanitize_float($_POST['price_per_unit'] ?? 0);
 
-    return api_transaction(function() use ($params) {
+    if (!$templateId || !$description) {
+        return ['success' => false, 'error' => 'Template ID og beskrivelse er påkrævet'];
+    }
+
+    db_begin_transaction();
+    try {
         // Get next display order
         $maxOrder = db_value("
             SELECT COALESCE(MAX(display_order), 0)
             FROM budget_template_items
             WHERE template_id = :template_id
-        ", ['template_id' => $params['template_id']]);
+        ", ['template_id' => $templateId]);
 
         $itemData = [
-            'template_id' => $params['template_id'],
-            'description' => $params['description'],
-            'quantity' => $params['quantity'] ?? 1,
-            'unit' => $params['unit'] ?? 'stk',
-            'price_per_unit' => $params['price_per_unit'] ?? 0,
-            'timeline' => $params['timeline'] ?? '',
-            'notes' => $params['notes'] ?? '',
+            'template_id' => $templateId,
+            'description' => $description,
+            'quantity' => $quantity,
+            'unit' => $unit,
+            'price_per_unit' => $pricePerUnit,
+            'timeline' => sanitize_string($_POST['timeline'] ?? ''),
+            'notes' => sanitize_string($_POST['notes'] ?? ''),
             'display_order' => $maxOrder + 1
         ];
 
@@ -329,17 +355,23 @@ function handle_add_item(array $user): array {
         db_update('budget_templates',
             ['updated_at' => date('Y-m-d H:i:s')],
             'id = :id',
-            ['id' => $params['template_id']]
+            ['id' => $templateId]
         );
 
-        log_activity('template_item_added', 'template', $params['template_id']);
+        db_commit();
+
+        log_activity('template_item_added', 'template', $templateId);
 
         return [
             'success' => true,
             'item_id' => $itemId,
             'message' => 'Element tilføjet til template'
         ];
-    }, 'Kunne ikke tilføje element');
+
+    } catch (Exception $e) {
+        db_rollback();
+        return ['success' => false, 'error' => 'Kunne ikke tilføje element'];
+    }
 }
 
 /**
@@ -347,21 +379,23 @@ function handle_add_item(array $user): array {
  * POST ?module=template&action=update_item
  */
 function handle_update_item(array $user): array {
-    $csrfCheck = api_require_csrf();
-    if (!$csrfCheck['success']) return $csrfCheck;
+    csrf_require();
 
-    $validation = api_validate_params(['id' => 'required|int'], $_POST);
-    if (!$validation['success']) return $validation;
-    $itemId = $validation['params']['id'];
+    $itemId = sanitize_int($_POST['id'] ?? 0);
+
+    if (!$itemId) {
+        return ['success' => false, 'error' => 'Element ID mangler'];
+    }
 
     // Get item to get template_id
     $item = db_fetch("SELECT template_id FROM budget_template_items WHERE id = :id", ['id' => $itemId]);
 
     if (!$item) {
-        return api_error('Element ikke fundet');
+        return ['success' => false, 'error' => 'Element ikke fundet'];
     }
 
-    return api_transaction(function() use ($itemId, $item) {
+    db_begin_transaction();
+    try {
         $updateData = [];
 
         if (isset($_POST['description'])) {
@@ -399,13 +433,19 @@ function handle_update_item(array $user): array {
             );
         }
 
+        db_commit();
+
         log_activity('template_item_updated', 'template_item', $itemId);
 
         return [
             'success' => true,
             'message' => 'Element opdateret'
         ];
-    }, 'Kunne ikke opdatere element');
+
+    } catch (Exception $e) {
+        db_rollback();
+        return ['success' => false, 'error' => 'Kunne ikke opdatere element'];
+    }
 }
 
 /**
@@ -413,21 +453,23 @@ function handle_update_item(array $user): array {
  * POST ?module=template&action=delete_item
  */
 function handle_delete_item(array $user): array {
-    $csrfCheck = api_require_csrf();
-    if (!$csrfCheck['success']) return $csrfCheck;
+    csrf_require();
 
-    $validation = api_validate_params(['id' => 'required|int'], $_POST);
-    if (!$validation['success']) return $validation;
-    $itemId = $validation['params']['id'];
+    $itemId = sanitize_int($_POST['id'] ?? 0);
+
+    if (!$itemId) {
+        return ['success' => false, 'error' => 'Element ID mangler'];
+    }
 
     // Get item to get template_id
     $item = db_fetch("SELECT template_id FROM budget_template_items WHERE id = :id", ['id' => $itemId]);
 
     if (!$item) {
-        return api_error('Element ikke fundet');
+        return ['success' => false, 'error' => 'Element ikke fundet'];
     }
 
-    return api_transaction(function() use ($itemId, $item) {
+    db_begin_transaction();
+    try {
         db_delete('budget_template_items', 'id = :id', ['id' => $itemId]);
 
         // Update template timestamp
@@ -437,13 +479,19 @@ function handle_delete_item(array $user): array {
             ['id' => $item['template_id']]
         );
 
+        db_commit();
+
         log_activity('template_item_deleted', 'template_item', $itemId);
 
         return [
             'success' => true,
             'message' => 'Element slettet'
         ];
-    }, 'Kunne ikke slette element');
+
+    } catch (Exception $e) {
+        db_rollback();
+        return ['success' => false, 'error' => 'Kunne ikke slette element'];
+    }
 }
 
 /**
@@ -451,27 +499,23 @@ function handle_delete_item(array $user): array {
  * POST ?module=template&action=reorder_items
  */
 function handle_reorder_items(array $user): array {
-    $csrfCheck = api_require_csrf();
-    if (!$csrfCheck['success']) return $csrfCheck;
+    csrf_require();
 
-    $validation = api_validate_params([
-        'template_id' => 'required|int',
-        'item_ids' => 'required'
-    ], $_POST);
-    if (!$validation['success']) return $validation;
-    $params = $validation['params'];
+    $templateId = sanitize_int($_POST['template_id'] ?? 0);
+    $itemIds = $_POST['item_ids'] ?? [];
 
-    if (!is_array($params['item_ids'])) {
-        return api_error('Element ID liste er påkrævet');
+    if (!$templateId || !is_array($itemIds)) {
+        return ['success' => false, 'error' => 'Template ID og element ID liste er påkrævet'];
     }
 
-    return api_transaction(function() use ($params) {
-        foreach ($params['item_ids'] as $order => $itemId) {
+    db_begin_transaction();
+    try {
+        foreach ($itemIds as $order => $itemId) {
             $itemId = sanitize_int($itemId);
             db_update('budget_template_items',
                 ['display_order' => $order + 1],
                 'id = :id AND template_id = :template_id',
-                ['id' => $itemId, 'template_id' => $params['template_id']]
+                ['id' => $itemId, 'template_id' => $templateId]
             );
         }
 
@@ -479,16 +523,22 @@ function handle_reorder_items(array $user): array {
         db_update('budget_templates',
             ['updated_at' => date('Y-m-d H:i:s')],
             'id = :id',
-            ['id' => $params['template_id']]
+            ['id' => $templateId]
         );
 
-        log_activity('template_items_reordered', 'template', $params['template_id']);
+        db_commit();
+
+        log_activity('template_items_reordered', 'template', $templateId);
 
         return [
             'success' => true,
             'message' => 'Element rækkefølge opdateret'
         ];
-    }, 'Kunne ikke opdatere rækkefølge');
+
+    } catch (Exception $e) {
+        db_rollback();
+        return ['success' => false, 'error' => 'Kunne ikke opdatere rækkefølge'];
+    }
 }
 
 /**
@@ -496,21 +546,20 @@ function handle_reorder_items(array $user): array {
  * POST ?module=template&action=apply_template
  */
 function handle_apply_template(array $user): array {
-    $csrfCheck = api_require_csrf();
-    if (!$csrfCheck['success']) return $csrfCheck;
+    csrf_require();
 
-    $validation = api_validate_params([
-        'template_id' => 'required|int',
-        'element_id' => 'required|int'
-    ], $_POST);
-    if (!$validation['success']) return $validation;
-    $params = $validation['params'];
+    $templateId = sanitize_int($_POST['template_id'] ?? 0);
+    $elementId = sanitize_int($_POST['element_id'] ?? 0);
+
+    if (!$templateId || !$elementId) {
+        return ['success' => false, 'error' => 'Template ID og element ID er påkrævet'];
+    }
 
     // Get template
-    $template = db_fetch("SELECT * FROM budget_templates WHERE id = :id", ['id' => $params['template_id']]);
+    $template = db_fetch("SELECT * FROM budget_templates WHERE id = :id", ['id' => $templateId]);
 
     if (!$template) {
-        return api_error('Template ikke fundet');
+        return ['success' => false, 'error' => 'Template ikke fundet'];
     }
 
     // Get element to check project access
@@ -519,15 +568,15 @@ function handle_apply_template(array $user): array {
         FROM building_elements be
         JOIN buildings b ON b.id = be.building_id
         WHERE be.id = :id
-    ", ['id' => $params['element_id']]);
+    ", ['id' => $elementId]);
 
     if (!$element) {
-        return api_error('Element ikke fundet');
+        return ['success' => false, 'error' => 'Element ikke fundet'];
     }
 
     // Check project access (editor required)
     if (!can_access_project($user, $element['project_id'], 'editor')) {
-        return api_error('Ingen adgang til at anvende template');
+        return ['success' => false, 'error' => 'Ingen adgang til at anvende template'];
     }
 
     // Get template items
@@ -535,14 +584,15 @@ function handle_apply_template(array $user): array {
         SELECT * FROM budget_template_items
         WHERE template_id = :template_id
         ORDER BY display_order ASC
-    ", ['template_id' => $params['template_id']]);
+    ", ['template_id' => $templateId]);
 
-    return api_transaction(function() use ($params, $template, $items) {
+    db_begin_transaction();
+    try {
         $createdCount = 0;
 
         foreach ($items as $item) {
             db_insert('budget_lines', [
-                'element_id' => $params['element_id'],
+                'element_id' => $elementId,
                 'budget_type' => $template['budget_type'],
                 'description' => $item['description'],
                 'quantity' => $item['quantity'],
@@ -564,18 +614,24 @@ function handle_apply_template(array $user): array {
             db_update('building_elements',
                 ['capex' => $total],
                 'id = :id',
-                ['id' => $params['element_id']]
+                ['id' => $elementId]
             );
         }
 
-        log_activity('template_applied', 'template', $params['template_id']);
+        db_commit();
+
+        log_activity('template_applied', 'template', $templateId);
 
         return [
             'success' => true,
             'created_count' => $createdCount,
             'message' => "$createdCount budget linjer oprettet fra template"
         ];
-    }, 'Kunne ikke anvende template');
+
+    } catch (Exception $e) {
+        db_rollback();
+        return ['success' => false, 'error' => 'Kunne ikke anvende template'];
+    }
 }
 
 /**
@@ -614,16 +670,18 @@ function handle_get_categories(array $user): array {
  * GET ?module=template&action=get_hierarchy&id=X
  */
 function handle_get_hierarchy(array $user): array {
-    $validation = api_validate_params(['id' => 'required|int'], $_GET);
-    if (!$validation['success']) return $validation;
-    $templateId = $validation['params']['id'];
+    $templateId = sanitize_int($_GET['id'] ?? 0);
+
+    if (!$templateId) {
+        return ['success' => false, 'error' => 'Template ID mangler'];
+    }
 
     $template = db_fetch("
         SELECT * FROM budget_templates WHERE id = :id
     ", ['id' => $templateId]);
 
     if (!$template) {
-        return api_error('Template ikke fundet');
+        return ['success' => false, 'error' => 'Template ikke fundet'];
     }
 
     // Get hierarchical structure using database function
@@ -643,35 +701,33 @@ function handle_get_hierarchy(array $user): array {
  * POST ?module=template&action=create_group
  */
 function handle_create_group(array $user): array {
-    $csrfCheck = api_require_csrf();
-    if (!$csrfCheck['success']) return $csrfCheck;
+    csrf_require();
 
-    $validation = api_validate_params([
-        'template_id' => 'required|int',
-        'description' => 'required',
-        'parent_id' => 'optional|int',
-        'quantity' => 'optional|float'
-    ], $_POST);
-    if (!$validation['success']) return $validation;
-    $params = $validation['params'];
+    $templateId = sanitize_int($_POST['template_id'] ?? 0);
+    $description = sanitize_string($_POST['description'] ?? '');
+    $parentId = isset($_POST['parent_id']) ? sanitize_int($_POST['parent_id']) : null;
+    $quantity = sanitize_float($_POST['quantity'] ?? 1);
 
-    return api_transaction(function() use ($params) {
-        $parentId = $params['parent_id'] ?? null;
+    if (!$templateId || !$description) {
+        return ['success' => false, 'error' => 'Template ID og beskrivelse er påkrævet'];
+    }
 
+    db_begin_transaction();
+    try {
         // Get next display order
         $maxOrder = db_value("
             SELECT COALESCE(MAX(display_order), 0)
             FROM budget_template_items
             WHERE template_id = :template_id AND parent_id " . ($parentId ? "= :parent_id" : "IS NULL"),
-            $parentId ? ['template_id' => $params['template_id'], 'parent_id' => $parentId] : ['template_id' => $params['template_id']]
+            $parentId ? ['template_id' => $templateId, 'parent_id' => $parentId] : ['template_id' => $templateId]
         );
 
         $itemData = [
-            'template_id' => $params['template_id'],
+            'template_id' => $templateId,
             'parent_id' => $parentId,
-            'description' => $params['description'],
+            'description' => $description,
             'is_group' => true,
-            'quantity' => $params['quantity'] ?? 1,
+            'quantity' => $quantity,
             'unit' => 'stk',
             'price_per_unit' => 0,
             'multiplier' => 1,
@@ -684,17 +740,23 @@ function handle_create_group(array $user): array {
         db_update('budget_templates',
             ['updated_at' => date('Y-m-d H:i:s')],
             'id = :id',
-            ['id' => $params['template_id']]
+            ['id' => $templateId]
         );
 
-        log_activity('template_group_created', 'template', $params['template_id']);
+        db_commit();
+
+        log_activity('template_group_created', 'template', $templateId);
 
         return [
             'success' => true,
             'item_id' => $itemId,
             'message' => 'Gruppe oprettet'
         ];
-    }, 'Kunne ikke oprette gruppe');
+
+    } catch (Exception $e) {
+        db_rollback();
+        return ['success' => false, 'error' => 'Kunne ikke oprette gruppe'];
+    }
 }
 
 /**
@@ -702,38 +764,38 @@ function handle_create_group(array $user): array {
  * POST ?module=template&action=update_multiplier
  */
 function handle_update_multiplier(array $user): array {
-    $csrfCheck = api_require_csrf();
-    if (!$csrfCheck['success']) return $csrfCheck;
+    csrf_require();
 
-    $validation = api_validate_params([
-        'id' => 'required|int',
-        'quantity' => 'required|float'
-    ], $_POST);
-    if (!$validation['success']) return $validation;
-    $params = $validation['params'];
+    $itemId = sanitize_int($_POST['id'] ?? 0);
+    $newQuantity = sanitize_float($_POST['quantity'] ?? 1);
+
+    if (!$itemId) {
+        return ['success' => false, 'error' => 'Element ID mangler'];
+    }
 
     // Get item
     $item = db_fetch("
         SELECT * FROM budget_template_items WHERE id = :id
-    ", ['id' => $params['id']]);
+    ", ['id' => $itemId]);
 
     if (!$item) {
-        return api_error('Element ikke fundet');
+        return ['success' => false, 'error' => 'Element ikke fundet'];
     }
 
     if (!$item['is_group']) {
-        return api_error('Kun grupper kan have multiplier');
+        return ['success' => false, 'error' => 'Kun grupper kan have multiplier'];
     }
 
-    return api_transaction(function() use ($params, $item) {
+    db_begin_transaction();
+    try {
         $oldQuantity = (float)$item['quantity'];
-        $multiplierChange = $oldQuantity > 0 ? ($params['quantity'] / $oldQuantity) : 1;
+        $multiplierChange = $oldQuantity > 0 ? ($newQuantity / $oldQuantity) : 1;
 
         // Update group quantity
         db_update('budget_template_items',
-            ['quantity' => $params['quantity']],
+            ['quantity' => $newQuantity],
             'id = :id',
-            ['id' => $params['id']]
+            ['id' => $itemId]
         );
 
         // Update all children multipliers
@@ -743,7 +805,7 @@ function handle_update_multiplier(array $user): array {
             WHERE parent_id = :parent_id
         ", [
             'multiplier_change' => $multiplierChange,
-            'parent_id' => $params['id']
+            'parent_id' => $itemId
         ]);
 
         // Update template timestamp
@@ -753,14 +815,20 @@ function handle_update_multiplier(array $user): array {
             ['id' => $item['template_id']]
         );
 
-        log_activity('template_multiplier_updated', 'template_item', $params['id']);
+        db_commit();
+
+        log_activity('template_multiplier_updated', 'template_item', $itemId);
 
         return [
             'success' => true,
             'message' => 'Multiplier opdateret',
             'multiplier_change' => $multiplierChange
         ];
-    }, 'Kunne ikke opdatere multiplier');
+
+    } catch (Exception $e) {
+        db_rollback();
+        return ['success' => false, 'error' => 'Kunne ikke opdatere multiplier'];
+    }
 }
 
 /**
@@ -768,36 +836,34 @@ function handle_update_multiplier(array $user): array {
  * POST ?module=template&action=move_item
  */
 function handle_move_item(array $user): array {
-    $csrfCheck = api_require_csrf();
-    if (!$csrfCheck['success']) return $csrfCheck;
+    csrf_require();
 
-    $validation = api_validate_params([
-        'id' => 'required|int',
-        'new_parent_id' => 'optional|int'
-    ], $_POST);
-    if (!$validation['success']) return $validation;
-    $params = $validation['params'];
+    $itemId = sanitize_int($_POST['id'] ?? 0);
+    $newParentId = isset($_POST['new_parent_id']) ? sanitize_int($_POST['new_parent_id']) : null;
 
-    // Get item
-    $item = db_fetch("SELECT * FROM budget_template_items WHERE id = :id", ['id' => $params['id']]);
-
-    if (!$item) {
-        return api_error('Element ikke fundet');
+    if (!$itemId) {
+        return ['success' => false, 'error' => 'Element ID mangler'];
     }
 
-    $newParentId = $params['new_parent_id'] ?? null;
+    // Get item
+    $item = db_fetch("SELECT * FROM budget_template_items WHERE id = :id", ['id' => $itemId]);
+
+    if (!$item) {
+        return ['success' => false, 'error' => 'Element ikke fundet'];
+    }
 
     // Prevent moving to self
-    if ($newParentId === $params['id']) {
-        return api_error('Element kan ikke flyttes til sig selv');
+    if ($newParentId === $itemId) {
+        return ['success' => false, 'error' => 'Element kan ikke flyttes til sig selv'];
     }
 
     // Check for circular reference
-    if ($newParentId !== null && is_template_item_descendant($newParentId, $params['id'])) {
-        return api_error('Element kan ikke flyttes til et af sine underordnede');
+    if ($newParentId !== null && is_template_item_descendant($newParentId, $itemId)) {
+        return ['success' => false, 'error' => 'Element kan ikke flyttes til et af sine underordnede'];
     }
 
-    return api_transaction(function() use ($params, $item, $newParentId) {
+    db_begin_transaction();
+    try {
         // Get next display order in new location
         $maxOrder = db_value("
             SELECT COALESCE(MAX(display_order), 0)
@@ -814,7 +880,7 @@ function handle_move_item(array $user): array {
                 'display_order' => $maxOrder + 1
             ],
             'id = :id',
-            ['id' => $params['id']]
+            ['id' => $itemId]
         );
 
         // Update template timestamp
@@ -824,13 +890,19 @@ function handle_move_item(array $user): array {
             ['id' => $item['template_id']]
         );
 
-        log_activity('template_item_moved', 'template_item', $params['id']);
+        db_commit();
+
+        log_activity('template_item_moved', 'template_item', $itemId);
 
         return [
             'success' => true,
             'message' => 'Element flyttet'
         ];
-    }, 'Kunne ikke flytte element');
+
+    } catch (Exception $e) {
+        db_rollback();
+        return ['success' => false, 'error' => 'Kunne ikke flytte element'];
+    }
 }
 
 /**
