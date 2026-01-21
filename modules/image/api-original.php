@@ -34,25 +34,20 @@
  */
 
 require_once __DIR__ . '/../../core/permissions.php';
-require_once __DIR__ . '/../../core/api-helpers.php';
 
 /**
  * Upload new image(s)
  * POST ?module=image&action=upload
  */
 function handle_upload(array $user): array {
-    $csrfCheck = api_require_csrf();
-    if (!$csrfCheck['success']) return $csrfCheck;
+    csrf_require();
 
-    $validation = api_validate_params($_POST, [
-        'element_id' => ['type' => 'int', 'required' => true, 'error' => 'Element ID mangler']
-    ], [
-        'description' => ['type' => 'string', 'required' => false, 'default' => '']
-    ]);
-    if (!$validation['success']) return $validation;
+    $elementId = sanitize_int($_POST['element_id'] ?? 0);
+    $description = sanitize_string($_POST['description'] ?? '');
 
-    $elementId = $validation['data']['element_id'];
-    $description = $validation['data']['description'];
+    if (!$elementId) {
+        return ['success' => false, 'error' => 'Element ID mangler'];
+    }
 
     // Get element to check project access
     $element = db_fetch("
@@ -63,16 +58,17 @@ function handle_upload(array $user): array {
     ", ['id' => $elementId]);
 
     if (!$element) {
-        return api_error('Element ikke fundet');
+        return ['success' => false, 'error' => 'Element ikke fundet'];
     }
 
     // Check project access (editor required)
-    $accessCheck = api_require_project_access($user, $element['project_id'], 'editor');
-    if (!$accessCheck['success']) return $accessCheck;
+    if (!can_access_project($user, $element['project_id'], 'editor')) {
+        return ['success' => false, 'error' => 'Ingen adgang til at uploade billeder'];
+    }
 
     // Check if file was uploaded
     if (!isset($_FILES['image']) || $_FILES['image']['error'] !== UPLOAD_ERR_OK) {
-        return api_error('Ingen fil uploadet eller upload fejl');
+        return ['success' => false, 'error' => 'Ingen fil uploadet eller upload fejl'];
     }
 
     $file = $_FILES['image'];
@@ -84,16 +80,17 @@ function handle_upload(array $user): array {
     finfo_close($finfo);
 
     if (!in_array($mimeType, $allowedTypes)) {
-        return api_error('Ugyldig filtype. Kun billeder tilladt.');
+        return ['success' => false, 'error' => 'Ugyldig filtype. Kun billeder tilladt.'];
     }
 
     // Validate file size (max 10MB)
     $maxSize = 10 * 1024 * 1024; // 10MB
     if ($file['size'] > $maxSize) {
-        return api_error('Filen er for stor. Max 10MB');
+        return ['success' => false, 'error' => 'Filen er for stor. Max 10MB'];
     }
 
-    return api_transaction(function() use ($user, $elementId, $description, $file, $mimeType) {
+    db_begin_transaction();
+    try {
         // Generate unique filename
         $extension = pathinfo($file['name'], PATHINFO_EXTENSION);
         $filename = uniqid('img_') . '_' . time() . '.' . $extension;
@@ -145,6 +142,8 @@ function handle_upload(array $user): array {
 
         $imageId = db_insert('element_images', $imageData);
 
+        db_commit();
+
         log_activity('image_uploaded', 'image', $imageId);
 
         return [
@@ -154,12 +153,14 @@ function handle_upload(array $user): array {
             'message' => 'Billede uploadet succesfuldt'
         ];
 
-    }, function($filepath) {
-        // Cleanup callback on rollback - delete file if database insert failed
+    } catch (Exception $e) {
+        db_rollback();
+        // Delete file if database insert failed
         if (isset($filepath) && file_exists($filepath)) {
             unlink($filepath);
         }
-    });
+        return ['success' => false, 'error' => 'Kunne ikke uploade billede: ' . $e->getMessage()];
+    }
 }
 
 /**
@@ -167,18 +168,14 @@ function handle_upload(array $user): array {
  * GET ?module=image&action=get_list&element_id=X
  */
 function handle_get_list(array $user): array {
-    $validation = api_validate_params($_GET, [
-        'element_id' => ['type' => 'int', 'required' => true, 'error' => 'Element ID mangler']
-    ], [
-        'page' => ['type' => 'int', 'required' => false, 'default' => 1],
-        'limit' => ['type' => 'int', 'required' => false, 'default' => 50]
-    ]);
-    if (!$validation['success']) return $validation;
-
-    $elementId = $validation['data']['element_id'];
-    $page = $validation['data']['page'];
-    $limit = $validation['data']['limit'];
+    $elementId = sanitize_int($_GET['element_id'] ?? 0);
+    $page = sanitize_int($_GET['page'] ?? 1);
+    $limit = sanitize_int($_GET['limit'] ?? 50);
     $offset = ($page - 1) * $limit;
+
+    if (!$elementId) {
+        return ['success' => false, 'error' => 'Element ID mangler'];
+    }
 
     // Get element to check project access
     $element = db_fetch("
@@ -189,12 +186,13 @@ function handle_get_list(array $user): array {
     ", ['id' => $elementId]);
 
     if (!$element) {
-        return api_error('Element ikke fundet');
+        return ['success' => false, 'error' => 'Element ikke fundet'];
     }
 
     // Check project access
-    $accessCheck = api_require_project_access($user, $element['project_id'], 'viewer');
-    if (!$accessCheck['success']) return $accessCheck;
+    if (!can_access_project($user, $element['project_id'], 'viewer')) {
+        return ['success' => false, 'error' => 'Ingen adgang til elementet'];
+    }
 
     // Get images with pagination
     $images = db_fetch_all("
@@ -234,12 +232,11 @@ function handle_get_list(array $user): array {
  * GET ?module=image&action=get_image&id=X
  */
 function handle_get_image(array $user): array {
-    $validation = api_validate_params($_GET, [
-        'id' => ['type' => 'int', 'required' => true, 'error' => 'Billede ID mangler']
-    ]);
-    if (!$validation['success']) return $validation;
+    $imageId = sanitize_int($_GET['id'] ?? 0);
 
-    $imageId = $validation['data']['id'];
+    if (!$imageId) {
+        return ['success' => false, 'error' => 'Billede ID mangler'];
+    }
 
     // Get image with element and project info
     $image = db_fetch("
@@ -256,12 +253,13 @@ function handle_get_image(array $user): array {
     ", ['id' => $imageId]);
 
     if (!$image) {
-        return api_error('Billede ikke fundet');
+        return ['success' => false, 'error' => 'Billede ikke fundet'];
     }
 
     // Check project access
-    $accessCheck = api_require_project_access($user, $image['project_id'], 'viewer');
-    if (!$accessCheck['success']) return $accessCheck;
+    if (!can_access_project($user, $image['project_id'], 'viewer')) {
+        return ['success' => false, 'error' => 'Ingen adgang til billedet'];
+    }
 
     return [
         'success' => true,
@@ -274,15 +272,13 @@ function handle_get_image(array $user): array {
  * POST ?module=image&action=update
  */
 function handle_update(array $user): array {
-    $csrfCheck = api_require_csrf();
-    if (!$csrfCheck['success']) return $csrfCheck;
+    csrf_require();
 
-    $validation = api_validate_params($_POST, [
-        'id' => ['type' => 'int', 'required' => true, 'error' => 'Billede ID mangler']
-    ]);
-    if (!$validation['success']) return $validation;
+    $imageId = sanitize_int($_POST['id'] ?? 0);
 
-    $imageId = $validation['data']['id'];
+    if (!$imageId) {
+        return ['success' => false, 'error' => 'Billede ID mangler'];
+    }
 
     // Get image to check project access
     $image = db_fetch("
@@ -294,14 +290,16 @@ function handle_update(array $user): array {
     ", ['id' => $imageId]);
 
     if (!$image) {
-        return api_error('Billede ikke fundet');
+        return ['success' => false, 'error' => 'Billede ikke fundet'];
     }
 
     // Check project access (editor required)
-    $accessCheck = api_require_project_access($user, $image['project_id'], 'editor');
-    if (!$accessCheck['success']) return $accessCheck;
+    if (!can_access_project($user, $image['project_id'], 'editor')) {
+        return ['success' => false, 'error' => 'Ingen adgang til at redigere billede'];
+    }
 
-    return api_transaction(function() use ($imageId) {
+    db_begin_transaction();
+    try {
         $updateData = [];
 
         if (isset($_POST['description'])) {
@@ -316,13 +314,19 @@ function handle_update(array $user): array {
             db_update('element_images', $updateData, 'id = :id', ['id' => $imageId]);
         }
 
+        db_commit();
+
         log_activity('image_updated', 'image', $imageId);
 
         return [
             'success' => true,
             'message' => 'Billede opdateret succesfuldt'
         ];
-    });
+
+    } catch (Exception $e) {
+        db_rollback();
+        return ['success' => false, 'error' => 'Kunne ikke opdatere billede'];
+    }
 }
 
 /**
@@ -330,15 +334,13 @@ function handle_update(array $user): array {
  * POST ?module=image&action=delete
  */
 function handle_delete(array $user): array {
-    $csrfCheck = api_require_csrf();
-    if (!$csrfCheck['success']) return $csrfCheck;
+    csrf_require();
 
-    $validation = api_validate_params($_POST, [
-        'id' => ['type' => 'int', 'required' => true, 'error' => 'Billede ID mangler']
-    ]);
-    if (!$validation['success']) return $validation;
+    $imageId = sanitize_int($_POST['id'] ?? 0);
 
-    $imageId = $validation['data']['id'];
+    if (!$imageId) {
+        return ['success' => false, 'error' => 'Billede ID mangler'];
+    }
 
     // Get image to check project access and get file path
     $image = db_fetch("
@@ -350,14 +352,16 @@ function handle_delete(array $user): array {
     ", ['id' => $imageId]);
 
     if (!$image) {
-        return api_error('Billede ikke fundet');
+        return ['success' => false, 'error' => 'Billede ikke fundet'];
     }
 
     // Check project access (editor required)
-    $accessCheck = api_require_project_access($user, $image['project_id'], 'editor');
-    if (!$accessCheck['success']) return $accessCheck;
+    if (!can_access_project($user, $image['project_id'], 'editor')) {
+        return ['success' => false, 'error' => 'Ingen adgang til at slette billede'];
+    }
 
-    return api_transaction(function() use ($imageId, $image) {
+    db_begin_transaction();
+    try {
         // Delete from database
         db_delete('element_images', 'id = :id', ['id' => $imageId]);
 
@@ -373,6 +377,8 @@ function handle_delete(array $user): array {
             ", ['element_id' => $image['element_id'], 'deleted_id' => $imageId]);
         }
 
+        db_commit();
+
         // Delete physical file
         $fullPath = __DIR__ . '/../../' . ltrim($image['filepath'], '/');
         if (file_exists($fullPath)) {
@@ -385,7 +391,11 @@ function handle_delete(array $user): array {
             'success' => true,
             'message' => 'Billede slettet succesfuldt'
         ];
-    });
+
+    } catch (Exception $e) {
+        db_rollback();
+        return ['success' => false, 'error' => 'Kunne ikke slette billede'];
+    }
 }
 
 /**
@@ -393,19 +403,13 @@ function handle_delete(array $user): array {
  * POST ?module=image&action=reorder
  */
 function handle_reorder(array $user): array {
-    $csrfCheck = api_require_csrf();
-    if (!$csrfCheck['success']) return $csrfCheck;
+    csrf_require();
 
-    $validation = api_validate_params($_POST, [
-        'element_id' => ['type' => 'int', 'required' => true, 'error' => 'Element ID mangler']
-    ]);
-    if (!$validation['success']) return $validation;
-
-    $elementId = $validation['data']['element_id'];
+    $elementId = sanitize_int($_POST['element_id'] ?? 0);
     $imageIds = $_POST['image_ids'] ?? [];
 
-    if (!is_array($imageIds)) {
-        return api_error('Billede ID liste er påkrævet');
+    if (!$elementId || !is_array($imageIds)) {
+        return ['success' => false, 'error' => 'Element ID og billede ID liste er påkrævet'];
     }
 
     // Get element to check project access
@@ -417,14 +421,16 @@ function handle_reorder(array $user): array {
     ", ['id' => $elementId]);
 
     if (!$element) {
-        return api_error('Element ikke fundet');
+        return ['success' => false, 'error' => 'Element ikke fundet'];
     }
 
     // Check project access (editor required)
-    $accessCheck = api_require_project_access($user, $element['project_id'], 'editor');
-    if (!$accessCheck['success']) return $accessCheck;
+    if (!can_access_project($user, $element['project_id'], 'editor')) {
+        return ['success' => false, 'error' => 'Ingen adgang til at ændre rækkefølge'];
+    }
 
-    return api_transaction(function() use ($elementId, $imageIds) {
+    db_begin_transaction();
+    try {
         foreach ($imageIds as $order => $imageId) {
             $imageId = sanitize_int($imageId);
             db_update('element_images',
@@ -434,13 +440,19 @@ function handle_reorder(array $user): array {
             );
         }
 
+        db_commit();
+
         log_activity('images_reordered', 'element', $elementId);
 
         return [
             'success' => true,
             'message' => 'Billede rækkefølge opdateret'
         ];
-    });
+
+    } catch (Exception $e) {
+        db_rollback();
+        return ['success' => false, 'error' => 'Kunne ikke opdatere rækkefølge'];
+    }
 }
 
 /**
@@ -448,15 +460,13 @@ function handle_reorder(array $user): array {
  * POST ?module=image&action=set_primary
  */
 function handle_set_primary(array $user): array {
-    $csrfCheck = api_require_csrf();
-    if (!$csrfCheck['success']) return $csrfCheck;
+    csrf_require();
 
-    $validation = api_validate_params($_POST, [
-        'id' => ['type' => 'int', 'required' => true, 'error' => 'Billede ID mangler']
-    ]);
-    if (!$validation['success']) return $validation;
+    $imageId = sanitize_int($_POST['id'] ?? 0);
 
-    $imageId = $validation['data']['id'];
+    if (!$imageId) {
+        return ['success' => false, 'error' => 'Billede ID mangler'];
+    }
 
     // Get image to check project access
     $image = db_fetch("
@@ -468,14 +478,16 @@ function handle_set_primary(array $user): array {
     ", ['id' => $imageId]);
 
     if (!$image) {
-        return api_error('Billede ikke fundet');
+        return ['success' => false, 'error' => 'Billede ikke fundet'];
     }
 
     // Check project access (editor required)
-    $accessCheck = api_require_project_access($user, $image['project_id'], 'editor');
-    if (!$accessCheck['success']) return $accessCheck;
+    if (!can_access_project($user, $image['project_id'], 'editor')) {
+        return ['success' => false, 'error' => 'Ingen adgang til at sætte primært billede'];
+    }
 
-    return api_transaction(function() use ($imageId, $image) {
+    db_begin_transaction();
+    try {
         // Unset all primary for this element
         db_execute("
             UPDATE element_images
@@ -490,13 +502,19 @@ function handle_set_primary(array $user): array {
             ['id' => $imageId]
         );
 
+        db_commit();
+
         log_activity('image_set_primary', 'image', $imageId);
 
         return [
             'success' => true,
             'message' => 'Primært billede sat'
         ];
-    });
+
+    } catch (Exception $e) {
+        db_rollback();
+        return ['success' => false, 'error' => 'Kunne ikke sætte primært billede'];
+    }
 }
 
 /**
@@ -504,15 +522,13 @@ function handle_set_primary(array $user): array {
  * POST ?module=image&action=bulk_upload
  */
 function handle_bulk_upload(array $user): array {
-    $csrfCheck = api_require_csrf();
-    if (!$csrfCheck['success']) return $csrfCheck;
+    csrf_require();
 
-    $validation = api_validate_params($_POST, [
-        'element_id' => ['type' => 'int', 'required' => true, 'error' => 'Element ID mangler']
-    ]);
-    if (!$validation['success']) return $validation;
+    $elementId = sanitize_int($_POST['element_id'] ?? 0);
 
-    $elementId = $validation['data']['element_id'];
+    if (!$elementId) {
+        return ['success' => false, 'error' => 'Element ID mangler'];
+    }
 
     // Get element to check project access
     $element = db_fetch("
@@ -523,15 +539,16 @@ function handle_bulk_upload(array $user): array {
     ", ['id' => $elementId]);
 
     if (!$element) {
-        return api_error('Element ikke fundet');
+        return ['success' => false, 'error' => 'Element ikke fundet'];
     }
 
     // Check project access (editor required)
-    $accessCheck = api_require_project_access($user, $element['project_id'], 'editor');
-    if (!$accessCheck['success']) return $accessCheck;
+    if (!can_access_project($user, $element['project_id'], 'editor')) {
+        return ['success' => false, 'error' => 'Ingen adgang til at uploade billeder'];
+    }
 
     if (!isset($_FILES['images']) || empty($_FILES['images']['name'])) {
-        return api_error('Ingen filer uploadet');
+        return ['success' => false, 'error' => 'Ingen filer uploadet'];
     }
 
     $uploadedImages = [];
@@ -648,12 +665,11 @@ function handle_bulk_upload(array $user): array {
  * GET ?module=image&action=get_gallery&element_id=X
  */
 function handle_get_gallery(array $user): array {
-    $validation = api_validate_params($_GET, [
-        'element_id' => ['type' => 'int', 'required' => true, 'error' => 'Element ID mangler']
-    ]);
-    if (!$validation['success']) return $validation;
+    $elementId = sanitize_int($_GET['element_id'] ?? 0);
 
-    $elementId = $validation['data']['element_id'];
+    if (!$elementId) {
+        return ['success' => false, 'error' => 'Element ID mangler'];
+    }
 
     // Get element to check project access
     $element = db_fetch("
@@ -664,12 +680,13 @@ function handle_get_gallery(array $user): array {
     ", ['id' => $elementId]);
 
     if (!$element) {
-        return api_error('Element ikke fundet');
+        return ['success' => false, 'error' => 'Element ikke fundet'];
     }
 
     // Check project access
-    $accessCheck = api_require_project_access($user, $element['project_id'], 'viewer');
-    if (!$accessCheck['success']) return $accessCheck;
+    if (!can_access_project($user, $element['project_id'], 'viewer')) {
+        return ['success' => false, 'error' => 'Ingen adgang til elementet'];
+    }
 
     // Get all images
     $images = db_fetch_all("
@@ -713,16 +730,14 @@ function handle_get_gallery(array $user): array {
  * POST ?module=image&action=save_annotations
  */
 function handle_save_annotations(array $user): array {
-    $csrfCheck = api_require_csrf();
-    if (!$csrfCheck['success']) return $csrfCheck;
+    csrf_require();
 
-    $validation = api_validate_params($_POST, [
-        'id' => ['type' => 'int', 'required' => true, 'error' => 'Billede ID mangler']
-    ]);
-    if (!$validation['success']) return $validation;
-
-    $imageId = $validation['data']['id'];
+    $imageId = sanitize_int($_POST['id'] ?? 0);
     $annotations = $_POST['annotations'] ?? '';
+
+    if (!$imageId) {
+        return ['success' => false, 'error' => 'Billede ID mangler'];
+    }
 
     // Get image to check project access
     $image = db_fetch("
@@ -734,14 +749,16 @@ function handle_save_annotations(array $user): array {
     ", ['id' => $imageId]);
 
     if (!$image) {
-        return api_error('Billede ikke fundet');
+        return ['success' => false, 'error' => 'Billede ikke fundet'];
     }
 
     // Check project access (editor required)
-    $accessCheck = api_require_project_access($user, $image['project_id'], 'editor');
-    if (!$accessCheck['success']) return $accessCheck;
+    if (!can_access_project($user, $image['project_id'], 'editor')) {
+        return ['success' => false, 'error' => 'Ingen adgang til at redigere billede'];
+    }
 
-    return api_transaction(function() use ($imageId, $annotations) {
+    db_begin_transaction();
+    try {
         // Validate JSON
         $annotationsData = json_decode($annotations, true);
         if (json_last_error() !== JSON_ERROR_NONE) {
@@ -754,13 +771,19 @@ function handle_save_annotations(array $user): array {
             ['id' => $imageId]
         );
 
+        db_commit();
+
         log_activity('image_annotations_saved', 'image', $imageId);
 
         return [
             'success' => true,
             'message' => 'Annotations gemt'
         ];
-    });
+
+    } catch (Exception $e) {
+        db_rollback();
+        return ['success' => false, 'error' => 'Kunne ikke gemme annotations: ' . $e->getMessage()];
+    }
 }
 
 /**
@@ -768,12 +791,11 @@ function handle_save_annotations(array $user): array {
  * GET ?module=image&action=get_annotations&id=X
  */
 function handle_get_annotations(array $user): array {
-    $validation = api_validate_params($_GET, [
-        'id' => ['type' => 'int', 'required' => true, 'error' => 'Billede ID mangler']
-    ]);
-    if (!$validation['success']) return $validation;
+    $imageId = sanitize_int($_GET['id'] ?? 0);
 
-    $imageId = $validation['data']['id'];
+    if (!$imageId) {
+        return ['success' => false, 'error' => 'Billede ID mangler'];
+    }
 
     // Get image
     $image = db_fetch("
@@ -785,12 +807,13 @@ function handle_get_annotations(array $user): array {
     ", ['id' => $imageId]);
 
     if (!$image) {
-        return api_error('Billede ikke fundet');
+        return ['success' => false, 'error' => 'Billede ikke fundet'];
     }
 
     // Check project access
-    $accessCheck = api_require_project_access($user, $image['project_id'], 'viewer');
-    if (!$accessCheck['success']) return $accessCheck;
+    if (!can_access_project($user, $image['project_id'], 'viewer')) {
+        return ['success' => false, 'error' => 'Ingen adgang til billedet'];
+    }
 
     $annotations = $image['annotations'] ? json_decode($image['annotations'], true) : [];
 
@@ -925,15 +948,13 @@ function handle_get_annotation_tools(array $user): array {
  * Note: This creates a NEW image file. Original image is preserved.
  */
 function handle_export_annotated(array $user): array {
-    $csrfCheck = api_require_csrf();
-    if (!$csrfCheck['success']) return $csrfCheck;
+    csrf_require();
 
-    $validation = api_validate_params($_POST, [
-        'id' => ['type' => 'int', 'required' => true, 'error' => 'Billede ID mangler']
-    ]);
-    if (!$validation['success']) return $validation;
+    $imageId = sanitize_int($_POST['id'] ?? 0);
 
-    $imageId = $validation['data']['id'];
+    if (!$imageId) {
+        return ['success' => false, 'error' => 'Billede ID mangler'];
+    }
 
     // Get image
     $image = db_fetch("
@@ -945,15 +966,16 @@ function handle_export_annotated(array $user): array {
     ", ['id' => $imageId]);
 
     if (!$image) {
-        return api_error('Billede ikke fundet');
+        return ['success' => false, 'error' => 'Billede ikke fundet'];
     }
 
     // Check project access
-    $accessCheck = api_require_project_access($user, $image['project_id'], 'editor');
-    if (!$accessCheck['success']) return $accessCheck;
+    if (!can_access_project($user, $image['project_id'], 'editor')) {
+        return ['success' => false, 'error' => 'Ingen adgang til at rendre billede'];
+    }
 
     if (!$image['annotations']) {
-        return api_error('Ingen annotations at rendre');
+        return ['success' => false, 'error' => 'Ingen annotations at rendre'];
     }
 
     try {
@@ -1005,7 +1027,7 @@ function handle_export_annotated(array $user): array {
         ];
 
     } catch (Exception $e) {
-        return api_error('Kunne ikke eksportere billede: ' . $e->getMessage());
+        return ['success' => false, 'error' => 'Kunne ikke eksportere billede: ' . $e->getMessage()];
     }
 }
 
