@@ -25,6 +25,7 @@
  */
 
 require_once __DIR__ . '/../../core/permissions.php';
+require_once __DIR__ . '/../../core/api-helpers.php';
 
 /**
  * Get list of users
@@ -72,11 +73,15 @@ function handle_get_users(array $user): array {
  * GET ?module=user&action=get_user&id=X
  */
 function handle_get_user(array $user): array {
-    $userId = sanitize_int($_GET['id'] ?? 0);
+    $validation = api_validate_params([
+        'id' => ['int', 'GET', true]
+    ]);
 
-    if (!$userId) {
-        return ['success' => false, 'error' => 'Bruger ID mangler'];
+    if (!$validation['success']) {
+        return $validation;
     }
+
+    $userId = $validation['data']['id'];
 
     // Get user with groups
     $userDetails = db_fetch("
@@ -92,7 +97,7 @@ function handle_get_user(array $user): array {
     ", ['id' => $userId]);
 
     if (!$userDetails) {
-        return ['success' => false, 'error' => 'Bruger ikke fundet'];
+        return api_error('Bruger ikke fundet');
     }
 
     // Get user groups
@@ -145,186 +150,175 @@ function handle_get_user(array $user): array {
  * Create new user
  * POST ?module=user&action=create_user
  */
-function handle_create_user(array $user): array {
-    csrf_require();
+function handle_create_user(array $currentUser): array {
+    $csrfCheck = api_require_csrf();
+    if (!$csrfCheck['success']) return $csrfCheck;
 
-    $name = sanitize_string($_POST['name'] ?? '');
-    $email = sanitize_string($_POST['email'] ?? '');
-    $password = $_POST['password'] ?? '';
+    $validation = api_validate_params([
+        'name' => ['string', 'POST', true],
+        'email' => ['string', 'POST', true],
+        'password' => ['string', 'POST', true],
+        'default_group_id' => ['int', 'POST', false, 0]
+    ]);
 
-    if (!$name || !$email || !$password) {
-        return ['success' => false, 'error' => 'Navn, email og password er påkrævet'];
+    if (!$validation['success']) {
+        return $validation;
     }
 
+    $params = $validation['data'];
+
     // Validate email
-    if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
-        return ['success' => false, 'error' => 'Ugyldig email'];
+    if (!filter_var($params['email'], FILTER_VALIDATE_EMAIL)) {
+        return api_error('Ugyldig email');
     }
 
     // Check if email already exists
-    $existingUser = db_fetch("SELECT id FROM users WHERE email = :email", ['email' => $email]);
-
+    $existingUser = db_fetch("SELECT id FROM users WHERE email = :email", ['email' => $params['email']]);
     if ($existingUser) {
-        return ['success' => false, 'error' => 'Email er allerede i brug'];
+        return api_error('Email er allerede i brug');
     }
 
-    db_begin_transaction();
-    try {
-        $userData = [
-            'name' => $name,
-            'email' => $email,
-            'password' => password_hash($password, PASSWORD_DEFAULT),
-            'is_active' => true,
-            'created_at' => date('Y-m-d H:i:s')
-        ];
+    return api_transaction(
+        function() use ($params) {
+            $userData = [
+                'name' => $params['name'],
+                'email' => $params['email'],
+                'password' => password_hash($params['password'], PASSWORD_DEFAULT),
+                'is_active' => true,
+                'created_at' => date('Y-m-d H:i:s')
+            ];
 
-        $newUserId = db_insert('users', $userData);
+            $newUserId = db_insert('users', $userData);
 
-        // Assign to default group if specified
-        $defaultGroupId = sanitize_int($_POST['default_group_id'] ?? 0);
-        if ($defaultGroupId) {
-            db_insert('permission_user_groups', [
-                'user_id' => $newUserId,
-                'group_id' => $defaultGroupId
-            ]);
-        }
+            // Assign to default group if specified
+            if ($params['default_group_id']) {
+                db_insert('permission_user_groups', [
+                    'user_id' => $newUserId,
+                    'group_id' => $params['default_group_id']
+                ]);
+            }
 
-        db_commit();
+            log_activity('user_created', 'user', $newUserId);
 
-        log_activity('user_created', 'user', $newUserId);
-
-        return [
-            'success' => true,
-            'user_id' => $newUserId,
-            'message' => 'Bruger oprettet succesfuldt'
-        ];
-
-    } catch (Exception $e) {
-        db_rollback();
-        return ['success' => false, 'error' => 'Kunne ikke oprette bruger'];
-    }
+            return ['user_id' => $newUserId];
+        },
+        'Bruger oprettet succesfuldt',
+        'Kunne ikke oprette bruger'
+    );
 }
 
 /**
  * Update user
  * POST ?module=user&action=update_user
  */
-function handle_update_user(array $user): array {
-    csrf_require();
+function handle_update_user(array $currentUser): array {
+    $csrfCheck = api_require_csrf();
+    if (!$csrfCheck['success']) return $csrfCheck;
 
-    $userId = sanitize_int($_POST['id'] ?? 0);
+    $validation = api_validate_params([
+        'id' => ['int', 'POST', true],
+        'name' => ['string', 'POST', false],
+        'email' => ['string', 'POST', false],
+        'is_active' => ['bool', 'POST', false],
+        'password' => ['string', 'POST', false]
+    ]);
 
-    if (!$userId) {
-        return ['success' => false, 'error' => 'Bruger ID mangler'];
+    if (!$validation['success']) {
+        return $validation;
     }
 
-    // Get existing user
-    $existingUser = db_fetch("SELECT * FROM users WHERE id = :id", ['id' => $userId]);
+    $params = $validation['data'];
+    $userId = $params['id'];
 
-    if (!$existingUser) {
-        return ['success' => false, 'error' => 'Bruger ikke fundet'];
+    // Build update data with validation
+    $updateData = [];
+
+    if (isset($params['name'])) {
+        $updateData['name'] = $params['name'];
     }
 
-    db_begin_transaction();
-    try {
-        $updateData = [];
-
-        if (isset($_POST['name'])) {
-            $updateData['name'] = sanitize_string($_POST['name']);
+    if (isset($params['email'])) {
+        if (!filter_var($params['email'], FILTER_VALIDATE_EMAIL)) {
+            return api_error('Ugyldig email');
         }
 
-        if (isset($_POST['email'])) {
-            $email = sanitize_string($_POST['email']);
-            if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
-                db_rollback();
-                return ['success' => false, 'error' => 'Ugyldig email'];
-            }
+        // Check if email is already used by another user
+        $emailExists = db_fetch("
+            SELECT id FROM users WHERE email = :email AND id != :user_id
+        ", ['email' => $params['email'], 'user_id' => $userId]);
 
-            // Check if email is already used by another user
-            $emailExists = db_fetch("
-                SELECT id FROM users WHERE email = :email AND id != :user_id
-            ", ['email' => $email, 'user_id' => $userId]);
-
-            if ($emailExists) {
-                db_rollback();
-                return ['success' => false, 'error' => 'Email er allerede i brug'];
-            }
-
-            $updateData['email'] = $email;
+        if ($emailExists) {
+            return api_error('Email er allerede i brug');
         }
 
-        if (isset($_POST['is_active'])) {
-            $updateData['is_active'] = (bool)$_POST['is_active'];
-        }
-
-        if (isset($_POST['password']) && !empty($_POST['password'])) {
-            $updateData['password'] = password_hash($_POST['password'], PASSWORD_DEFAULT);
-        }
-
-        if (!empty($updateData)) {
-            db_update('users', $updateData, 'id = :id', ['id' => $userId]);
-        }
-
-        db_commit();
-
-        log_activity('user_updated', 'user', $userId);
-
-        return [
-            'success' => true,
-            'message' => 'Bruger opdateret succesfuldt'
-        ];
-
-    } catch (Exception $e) {
-        db_rollback();
-        return ['success' => false, 'error' => 'Kunne ikke opdatere bruger'];
+        $updateData['email'] = $params['email'];
     }
+
+    if (isset($params['is_active'])) {
+        $updateData['is_active'] = $params['is_active'];
+    }
+
+    if (isset($params['password']) && !empty($params['password'])) {
+        $updateData['password'] = password_hash($params['password'], PASSWORD_DEFAULT);
+    }
+
+    if (empty($updateData)) {
+        return api_error('Ingen data at opdatere');
+    }
+
+    return api_crud_update(
+        'users',
+        $userId,
+        $updateData,
+        null,
+        function($id) {
+            log_activity('user_updated', 'user', $id);
+        }
+    );
 }
 
 /**
  * Delete user
  * POST ?module=user&action=delete_user
  */
-function handle_delete_user(array $user): array {
-    csrf_require();
+function handle_delete_user(array $currentUser): array {
+    $csrfCheck = api_require_csrf();
+    if (!$csrfCheck['success']) return $csrfCheck;
 
-    $userId = sanitize_int($_POST['id'] ?? 0);
+    $validation = api_validate_params([
+        'id' => ['int', 'POST', true]
+    ]);
 
-    if (!$userId) {
-        return ['success' => false, 'error' => 'Bruger ID mangler'];
+    if (!$validation['success']) {
+        return $validation;
     }
+
+    $userId = $validation['data']['id'];
 
     // Don't allow deleting yourself
-    if ($userId == $user['id']) {
-        return ['success' => false, 'error' => 'Du kan ikke slette dig selv'];
+    if ($userId == $currentUser['id']) {
+        return api_error('Du kan ikke slette dig selv');
     }
 
-    db_begin_transaction();
-    try {
-        // Remove from groups
-        db_execute("DELETE FROM permission_user_groups WHERE user_id = :id", ['id' => $userId]);
+    return api_transaction(
+        function() use ($userId) {
+            // Remove from groups
+            db_execute("DELETE FROM permission_user_groups WHERE user_id = :id", ['id' => $userId]);
 
-        // Remove user permissions
-        db_execute("DELETE FROM permission_user_permissions WHERE user_id = :id", ['id' => $userId]);
+            // Remove user permissions
+            db_execute("DELETE FROM permission_user_permissions WHERE user_id = :id", ['id' => $userId]);
 
-        // Remove project permissions
-        db_execute("DELETE FROM project_permissions WHERE entity_type = 'user' AND entity_id = :id", ['id' => $userId]);
+            // Remove project permissions
+            db_execute("DELETE FROM project_permissions WHERE entity_type = 'user' AND entity_id = :id", ['id' => $userId]);
 
-        // Deactivate instead of deleting (to preserve audit trail)
-        db_update('users', ['is_active' => false], 'id = :id', ['id' => $userId]);
+            // Deactivate instead of deleting (to preserve audit trail)
+            db_update('users', ['is_active' => false], 'id = :id', ['id' => $userId]);
 
-        db_commit();
-
-        log_activity('user_deleted', 'user', $userId);
-
-        return [
-            'success' => true,
-            'message' => 'Bruger deaktiveret succesfuldt'
-        ];
-
-    } catch (Exception $e) {
-        db_rollback();
-        return ['success' => false, 'error' => 'Kunne ikke slette bruger'];
-    }
+            log_activity('user_deleted', 'user', $userId);
+        },
+        'Bruger deaktiveret succesfuldt',
+        'Kunne ikke slette bruger'
+    );
 }
 
 /**
@@ -356,39 +350,32 @@ function handle_get_groups(array $user): array {
  * POST ?module=user&action=create_group
  */
 function handle_create_group(array $user): array {
-    csrf_require();
+    $csrfCheck = api_require_csrf();
+    if (!$csrfCheck['success']) return $csrfCheck;
 
-    $name = sanitize_string($_POST['name'] ?? '');
-    $description = sanitize_string($_POST['description'] ?? '');
+    $validation = api_validate_params([
+        'name' => ['string', 'POST', true],
+        'description' => ['string', 'POST', false, '']
+    ]);
 
-    if (!$name) {
-        return ['success' => false, 'error' => 'Gruppe navn er påkrævet'];
+    if (!$validation['success']) {
+        return $validation;
     }
 
-    db_begin_transaction();
-    try {
-        $groupData = [
-            'name' => $name,
-            'description' => $description,
+    $params = $validation['data'];
+
+    return api_crud_create(
+        'permission_groups',
+        [
+            'name' => $params['name'],
+            'description' => $params['description'],
             'is_active' => true
-        ];
-
-        $groupId = db_insert('permission_groups', $groupData);
-
-        db_commit();
-
-        log_activity('group_created', 'group', $groupId);
-
-        return [
-            'success' => true,
-            'group_id' => $groupId,
-            'message' => 'Gruppe oprettet succesfuldt'
-        ];
-
-    } catch (Exception $e) {
-        db_rollback();
-        return ['success' => false, 'error' => 'Kunne ikke oprette gruppe'];
-    }
+        ],
+        null,
+        function($groupId) {
+            log_activity('group_created', 'group', $groupId);
+        }
+    );
 }
 
 /**
@@ -396,47 +383,47 @@ function handle_create_group(array $user): array {
  * POST ?module=user&action=update_group
  */
 function handle_update_group(array $user): array {
-    csrf_require();
+    $csrfCheck = api_require_csrf();
+    if (!$csrfCheck['success']) return $csrfCheck;
 
-    $groupId = sanitize_int($_POST['id'] ?? 0);
+    $validation = api_validate_params([
+        'id' => ['int', 'POST', true],
+        'name' => ['string', 'POST', false],
+        'description' => ['string', 'POST', false],
+        'is_active' => ['bool', 'POST', false]
+    ]);
 
-    if (!$groupId) {
-        return ['success' => false, 'error' => 'Gruppe ID mangler'];
+    if (!$validation['success']) {
+        return $validation;
     }
 
-    db_begin_transaction();
-    try {
-        $updateData = [];
+    $params = $validation['data'];
+    $groupId = $params['id'];
 
-        if (isset($_POST['name'])) {
-            $updateData['name'] = sanitize_string($_POST['name']);
-        }
-
-        if (isset($_POST['description'])) {
-            $updateData['description'] = sanitize_string($_POST['description']);
-        }
-
-        if (isset($_POST['is_active'])) {
-            $updateData['is_active'] = (bool)$_POST['is_active'];
-        }
-
-        if (!empty($updateData)) {
-            db_update('permission_groups', $updateData, 'id = :id', ['id' => $groupId]);
-        }
-
-        db_commit();
-
-        log_activity('group_updated', 'group', $groupId);
-
-        return [
-            'success' => true,
-            'message' => 'Gruppe opdateret succesfuldt'
-        ];
-
-    } catch (Exception $e) {
-        db_rollback();
-        return ['success' => false, 'error' => 'Kunne ikke opdatere gruppe'];
+    $updateData = [];
+    if (isset($params['name'])) {
+        $updateData['name'] = $params['name'];
     }
+    if (isset($params['description'])) {
+        $updateData['description'] = $params['description'];
+    }
+    if (isset($params['is_active'])) {
+        $updateData['is_active'] = $params['is_active'];
+    }
+
+    if (empty($updateData)) {
+        return api_error('Ingen opdateringer');
+    }
+
+    return api_crud_update(
+        'permission_groups',
+        $groupId,
+        $updateData,
+        null,
+        function($id) {
+            log_activity('group_updated', 'group', $id);
+        }
+    );
 }
 
 /**
@@ -444,41 +431,38 @@ function handle_update_group(array $user): array {
  * POST ?module=user&action=delete_group
  */
 function handle_delete_group(array $user): array {
-    csrf_require();
+    $csrfCheck = api_require_csrf();
+    if (!$csrfCheck['success']) return $csrfCheck;
 
-    $groupId = sanitize_int($_POST['id'] ?? 0);
+    $validation = api_validate_params([
+        'id' => ['int', 'POST', true]
+    ]);
 
-    if (!$groupId) {
-        return ['success' => false, 'error' => 'Gruppe ID mangler'];
+    if (!$validation['success']) {
+        return $validation;
     }
 
-    db_begin_transaction();
-    try {
-        // Remove user assignments
-        db_execute("DELETE FROM permission_user_groups WHERE group_id = :id", ['id' => $groupId]);
+    $groupId = $validation['data']['id'];
 
-        // Remove group permissions
-        db_execute("DELETE FROM permission_group_permissions WHERE group_id = :id", ['id' => $groupId]);
+    return api_transaction(
+        function() use ($groupId) {
+            // Remove user assignments
+            db_execute("DELETE FROM permission_user_groups WHERE group_id = :id", ['id' => $groupId]);
 
-        // Remove project permissions
-        db_execute("DELETE FROM project_permissions WHERE entity_type = 'group' AND entity_id = :id", ['id' => $groupId]);
+            // Remove group permissions
+            db_execute("DELETE FROM permission_group_permissions WHERE group_id = :id", ['id' => $groupId]);
 
-        // Delete group
-        db_delete('permission_groups', 'id = :id', ['id' => $groupId]);
+            // Remove project permissions
+            db_execute("DELETE FROM project_permissions WHERE entity_type = 'group' AND entity_id = :id", ['id' => $groupId]);
 
-        db_commit();
+            // Delete group
+            db_delete('permission_groups', 'id = :id', ['id' => $groupId]);
 
-        log_activity('group_deleted', 'group', $groupId);
-
-        return [
-            'success' => true,
-            'message' => 'Gruppe slettet succesfuldt'
-        ];
-
-    } catch (Exception $e) {
-        db_rollback();
-        return ['success' => false, 'error' => 'Kunne ikke slette gruppe'];
-    }
+            log_activity('group_deleted', 'group', $groupId);
+        },
+        'Gruppe slettet succesfuldt',
+        'Kunne ikke slette gruppe'
+    );
 }
 
 /**
@@ -486,46 +470,41 @@ function handle_delete_group(array $user): array {
  * POST ?module=user&action=assign_user_to_group
  */
 function handle_assign_user_to_group(array $user): array {
-    csrf_require();
+    $csrfCheck = api_require_csrf();
+    if (!$csrfCheck['success']) return $csrfCheck;
 
-    $userId = sanitize_int($_POST['user_id'] ?? 0);
-    $groupId = sanitize_int($_POST['group_id'] ?? 0);
+    $validation = api_validate_params([
+        'user_id' => ['int', 'POST', true],
+        'group_id' => ['int', 'POST', true]
+    ]);
 
-    if (!$userId || !$groupId) {
-        return ['success' => false, 'error' => 'Bruger ID og gruppe ID er påkrævet'];
+    if (!$validation['success']) {
+        return $validation;
     }
 
-    db_begin_transaction();
-    try {
-        // Check if already assigned
-        $existing = db_fetch("
-            SELECT * FROM permission_user_groups
-            WHERE user_id = :user_id AND group_id = :group_id
-        ", ['user_id' => $userId, 'group_id' => $groupId]);
+    $params = $validation['data'];
 
-        if ($existing) {
-            db_rollback();
-            return ['success' => false, 'error' => 'Bruger er allerede i gruppen'];
+    return api_crud_create(
+        'permission_user_groups',
+        [
+            'user_id' => $params['user_id'],
+            'group_id' => $params['group_id']
+        ],
+        function($data) {
+            // Check if already assigned
+            $existing = db_fetch("
+                SELECT * FROM permission_user_groups
+                WHERE user_id = :user_id AND group_id = :group_id
+            ", ['user_id' => $data['user_id'], 'group_id' => $data['group_id']]);
+
+            if ($existing) {
+                throw new Exception('Bruger er allerede i gruppen');
+            }
+        },
+        function($id) use ($params) {
+            log_activity('user_assigned_to_group', 'user', $params['user_id']);
         }
-
-        db_insert('permission_user_groups', [
-            'user_id' => $userId,
-            'group_id' => $groupId
-        ]);
-
-        db_commit();
-
-        log_activity('user_assigned_to_group', 'user', $userId);
-
-        return [
-            'success' => true,
-            'message' => 'Bruger tilføjet til gruppe'
-        ];
-
-    } catch (Exception $e) {
-        db_rollback();
-        return ['success' => false, 'error' => 'Kunne ikke tilføje bruger til gruppe'];
-    }
+    );
 }
 
 /**
@@ -533,35 +512,32 @@ function handle_assign_user_to_group(array $user): array {
  * POST ?module=user&action=remove_user_from_group
  */
 function handle_remove_user_from_group(array $user): array {
-    csrf_require();
+    $csrfCheck = api_require_csrf();
+    if (!$csrfCheck['success']) return $csrfCheck;
 
-    $userId = sanitize_int($_POST['user_id'] ?? 0);
-    $groupId = sanitize_int($_POST['group_id'] ?? 0);
+    $validation = api_validate_params([
+        'user_id' => ['int', 'POST', true],
+        'group_id' => ['int', 'POST', true]
+    ]);
 
-    if (!$userId || !$groupId) {
-        return ['success' => false, 'error' => 'Bruger ID og gruppe ID er påkrævet'];
+    if (!$validation['success']) {
+        return $validation;
     }
 
-    db_begin_transaction();
-    try {
-        db_execute("
-            DELETE FROM permission_user_groups
-            WHERE user_id = :user_id AND group_id = :group_id
-        ", ['user_id' => $userId, 'group_id' => $groupId]);
+    $params = $validation['data'];
 
-        db_commit();
+    return api_transaction(
+        function() use ($params) {
+            db_execute("
+                DELETE FROM permission_user_groups
+                WHERE user_id = :user_id AND group_id = :group_id
+            ", ['user_id' => $params['user_id'], 'group_id' => $params['group_id']]);
 
-        log_activity('user_removed_from_group', 'user', $userId);
-
-        return [
-            'success' => true,
-            'message' => 'Bruger fjernet fra gruppe'
-        ];
-
-    } catch (Exception $e) {
-        db_rollback();
-        return ['success' => false, 'error' => 'Kunne ikke fjerne bruger fra gruppe'];
-    }
+            log_activity('user_removed_from_group', 'user', $params['user_id']);
+        },
+        'Bruger fjernet fra gruppe',
+        'Kunne ikke fjerne bruger fra gruppe'
+    );
 }
 
 /**
@@ -569,11 +545,15 @@ function handle_remove_user_from_group(array $user): array {
  * GET ?module=user&action=get_group_permissions&group_id=X
  */
 function handle_get_group_permissions(array $user): array {
-    $groupId = sanitize_int($_GET['group_id'] ?? 0);
+    $validation = api_validate_params([
+        'group_id' => ['int', 'GET', true]
+    ]);
 
-    if (!$groupId) {
-        return ['success' => false, 'error' => 'Gruppe ID mangler'];
+    if (!$validation['success']) {
+        return $validation;
     }
+
+    $groupId = $validation['data']['group_id'];
 
     $permissions = db_fetch_all("
         SELECT
@@ -603,154 +583,159 @@ function handle_get_group_permissions(array $user): array {
  * POST ?module=user&action=set_group_permissions
  */
 function handle_set_group_permissions(array $user): array {
-    csrf_require();
+    $csrfCheck = api_require_csrf();
+    if (!$csrfCheck['success']) return $csrfCheck;
 
-    $groupId = sanitize_int($_POST['group_id'] ?? 0);
+    $validation = api_validate_params([
+        'group_id' => ['int', 'POST', true]
+    ]);
+
+    if (!$validation['success']) {
+        return $validation;
+    }
+
+    $groupId = $validation['data']['group_id'];
     $permissions = $_POST['permissions'] ?? [];
 
-    if (!$groupId || !is_array($permissions)) {
-        return ['success' => false, 'error' => 'Gruppe ID og rettigheder er påkrævet'];
+    if (!is_array($permissions)) {
+        return api_error('Rettigheder skal være en array');
     }
 
-    db_begin_transaction();
-    try {
-        // Remove all existing permissions for group
-        db_execute("DELETE FROM permission_group_permissions WHERE group_id = :id", ['id' => $groupId]);
+    return api_transaction(
+        function() use ($groupId, $permissions) {
+            // Remove all existing permissions for group
+            db_execute("DELETE FROM permission_group_permissions WHERE group_id = :id", ['id' => $groupId]);
 
-        // Add new permissions
-        foreach ($permissions as $permissionId) {
-            $permissionId = sanitize_int($permissionId);
-            if ($permissionId > 0) {
-                db_insert('permission_group_permissions', [
-                    'group_id' => $groupId,
-                    'permission_id' => $permissionId
-                ]);
+            // Add new permissions
+            foreach ($permissions as $permissionId) {
+                $permissionId = sanitize_int($permissionId);
+                if ($permissionId > 0) {
+                    db_insert('permission_group_permissions', [
+                        'group_id' => $groupId,
+                        'permission_id' => $permissionId
+                    ]);
+                }
             }
-        }
 
-        db_commit();
-
-        log_activity('group_permissions_updated', 'group', $groupId);
-
-        return [
-            'success' => true,
-            'message' => 'Gruppe rettigheder opdateret'
-        ];
-
-    } catch (Exception $e) {
-        db_rollback();
-        return ['success' => false, 'error' => 'Kunne ikke opdatere rettigheder'];
-    }
+            log_activity('group_permissions_updated', 'group', $groupId);
+        },
+        'Gruppe rettigheder opdateret',
+        'Kunne ikke opdatere rettigheder'
+    );
 }
 
 /**
  * Grant project access to user or group
  * POST ?module=user&action=grant_project_access
  */
-function handle_grant_project_access(array $user): array {
-    csrf_require();
+function handle_grant_project_access(array $currentUser): array {
+    $csrfCheck = api_require_csrf();
+    if (!$csrfCheck['success']) return $csrfCheck;
 
-    $projectId = sanitize_int($_POST['project_id'] ?? 0);
-    $entityType = sanitize_string($_POST['entity_type'] ?? ''); // 'user' or 'group'
-    $entityId = sanitize_int($_POST['entity_id'] ?? 0);
-    $permissionLevel = sanitize_string($_POST['permission_level'] ?? 'viewer'); // owner, editor, viewer
+    $validation = api_validate_params([
+        'project_id' => ['int', 'POST', true],
+        'entity_type' => ['string', 'POST', true],
+        'entity_id' => ['int', 'POST', true],
+        'permission_level' => ['string', 'POST', false, 'viewer']
+    ]);
 
-    if (!$projectId || !$entityType || !$entityId) {
-        return ['success' => false, 'error' => 'Projekt ID, entity type og entity ID er påkrævet'];
+    if (!$validation['success']) {
+        return $validation;
     }
 
-    if (!in_array($entityType, ['user', 'group'])) {
-        return ['success' => false, 'error' => 'Ugyldig entity type'];
+    $params = $validation['data'];
+
+    if (!in_array($params['entity_type'], ['user', 'group'])) {
+        return api_error('Ugyldig entity type');
     }
 
-    if (!in_array($permissionLevel, ['owner', 'editor', 'viewer', 'none'])) {
-        return ['success' => false, 'error' => 'Ugyldig rettigheds niveau'];
+    if (!in_array($params['permission_level'], ['owner', 'editor', 'viewer', 'none'])) {
+        return api_error('Ugyldig rettigheds niveau');
     }
 
     // Check if current user has owner access to project
-    if (!can_access_project($user, $projectId, 'owner')) {
-        return ['success' => false, 'error' => 'Kun projekt ejere kan tildele adgang'];
+    $accessCheck = api_require_project_access($currentUser, $params['project_id'], 'owner');
+    if (!$accessCheck['success']) {
+        return api_error('Kun projekt ejere kan tildele adgang');
     }
 
-    db_begin_transaction();
-    try {
-        // Check if permission already exists
-        $existing = db_fetch("
-            SELECT id FROM project_permissions
-            WHERE project_id = :project_id AND entity_type = :entity_type AND entity_id = :entity_id
-        ", ['project_id' => $projectId, 'entity_type' => $entityType, 'entity_id' => $entityId]);
-
-        if ($existing) {
-            // Update existing
-            db_update('project_permissions',
-                ['permission_level' => $permissionLevel, 'granted_by_user_id' => $user['id']],
-                'id = :id',
-                ['id' => $existing['id']]
-            );
-        } else {
-            // Insert new
-            db_insert('project_permissions', [
-                'project_id' => $projectId,
-                'entity_type' => $entityType,
-                'entity_id' => $entityId,
-                'permission_level' => $permissionLevel,
-                'granted_by_user_id' => $user['id']
+    return api_transaction(
+        function() use ($params, $currentUser) {
+            // Check if permission already exists
+            $existing = db_fetch("
+                SELECT id FROM project_permissions
+                WHERE project_id = :project_id AND entity_type = :entity_type AND entity_id = :entity_id
+            ", [
+                'project_id' => $params['project_id'],
+                'entity_type' => $params['entity_type'],
+                'entity_id' => $params['entity_id']
             ]);
-        }
 
-        db_commit();
+            if ($existing) {
+                // Update existing
+                db_update('project_permissions',
+                    ['permission_level' => $params['permission_level'], 'granted_by_user_id' => $currentUser['id']],
+                    'id = :id',
+                    ['id' => $existing['id']]
+                );
+            } else {
+                // Insert new
+                db_insert('project_permissions', [
+                    'project_id' => $params['project_id'],
+                    'entity_type' => $params['entity_type'],
+                    'entity_id' => $params['entity_id'],
+                    'permission_level' => $params['permission_level'],
+                    'granted_by_user_id' => $currentUser['id']
+                ]);
+            }
 
-        log_activity('project_access_granted', 'project', $projectId);
-
-        return [
-            'success' => true,
-            'message' => 'Projekt adgang tildelt'
-        ];
-
-    } catch (Exception $e) {
-        db_rollback();
-        return ['success' => false, 'error' => 'Kunne ikke tildele projekt adgang'];
-    }
+            log_activity('project_access_granted', 'project', $params['project_id']);
+        },
+        'Projekt adgang tildelt',
+        'Kunne ikke tildele projekt adgang'
+    );
 }
 
 /**
  * Revoke project access
  * POST ?module=user&action=revoke_project_access
  */
-function handle_revoke_project_access(array $user): array {
-    csrf_require();
+function handle_revoke_project_access(array $currentUser): array {
+    $csrfCheck = api_require_csrf();
+    if (!$csrfCheck['success']) return $csrfCheck;
 
-    $projectId = sanitize_int($_POST['project_id'] ?? 0);
-    $entityType = sanitize_string($_POST['entity_type'] ?? '');
-    $entityId = sanitize_int($_POST['entity_id'] ?? 0);
+    $validation = api_validate_params([
+        'project_id' => ['int', 'POST', true],
+        'entity_type' => ['string', 'POST', true],
+        'entity_id' => ['int', 'POST', true]
+    ]);
 
-    if (!$projectId || !$entityType || !$entityId) {
-        return ['success' => false, 'error' => 'Projekt ID, entity type og entity ID er påkrævet'];
+    if (!$validation['success']) {
+        return $validation;
     }
+
+    $params = $validation['data'];
 
     // Check if current user has owner access to project
-    if (!can_access_project($user, $projectId, 'owner')) {
-        return ['success' => false, 'error' => 'Kun projekt ejere kan fjerne adgang'];
+    $accessCheck = api_require_project_access($currentUser, $params['project_id'], 'owner');
+    if (!$accessCheck['success']) {
+        return api_error('Kun projekt ejere kan fjerne adgang');
     }
 
-    db_begin_transaction();
-    try {
-        db_execute("
-            DELETE FROM project_permissions
-            WHERE project_id = :project_id AND entity_type = :entity_type AND entity_id = :entity_id
-        ", ['project_id' => $projectId, 'entity_type' => $entityType, 'entity_id' => $entityId]);
+    return api_transaction(
+        function() use ($params) {
+            db_execute("
+                DELETE FROM project_permissions
+                WHERE project_id = :project_id AND entity_type = :entity_type AND entity_id = :entity_id
+            ", [
+                'project_id' => $params['project_id'],
+                'entity_type' => $params['entity_type'],
+                'entity_id' => $params['entity_id']
+            ]);
 
-        db_commit();
-
-        log_activity('project_access_revoked', 'project', $projectId);
-
-        return [
-            'success' => true,
-            'message' => 'Projekt adgang fjernet'
-        ];
-
-    } catch (Exception $e) {
-        db_rollback();
-        return ['success' => false, 'error' => 'Kunne ikke fjerne projekt adgang'];
-    }
+            log_activity('project_access_revoked', 'project', $params['project_id']);
+        },
+        'Projekt adgang fjernet',
+        'Kunne ikke fjerne projekt adgang'
+    );
 }
