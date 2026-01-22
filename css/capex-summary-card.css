@@ -1,0 +1,526 @@
+/**
+ * CAPEX Summary Card Styling
+ * Collapsible cards with time interval breakdowns
+ */
+
+/* ============================================
+   CONTAINER
+   ============================================ */
+.capex-summary-container {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 24px;
+    background: #ffffff;
+    border-radius: 12px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.capex-summary-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 24px;
+    padding-bottom: 16px;
+    border-bottom: 2px solid #e5e7eb;
+}
+
+.capex-summary-header h2 {
+    margin: 0;
+    font-size: 24px;
+    font-weight: 700;
+    color: #111827;
+}
+
+.capex-summary-total {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    font-size: 14px;
+    color: #6b7280;
+}
+
+.capex-summary-total strong {
+    font-size: 28px;
+    font-weight: 700;
+    color: #111827;
+}
+
+.capex-summary-actions {
+    display: flex;
+    gap: 12px;
+    margin-bottom: 20px;
+}
+
+.btn-expand-all,
+.btn-collapse-all {
+    padding: 8px 16px;
+    border: 1px solid #d1d5db;
+    border-radius: 6px;
+    background: white;
+    font-size: 13px;
+    cursor: pointer;
+    transition: all 0.2s;
+    color: #374151;
+}
+
+.btn-expand-all:hover,
+.btn-collapse-all:hover {
+    background: #f9fafb;
+    border-color: #9ca3af;
+}
+
+/* ============================================
+   CARDS
+   ============================================ */
+.capex-summary-cards {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.capex-card {
+    --interval-color: #3b82f6;
+
+    border: 2px solid #e5e7eb;
+    border-radius: 10px;
+    overflow: hidden;
+    transition: all 0.3s ease;
+    background: white;
+}
+
+.capex-card:hover {
+    border-color: var(--interval-color);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+.capex-card.expanded {
+    border-color: var(--interval-color);
+}
+
+/* ============================================
+   CARD HEADER
+   ============================================ */
+.capex-card-header {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 16px 20px;
+    cursor: pointer;
+    user-select: none;
+    transition: background 0.2s;
+}
+
+.capex-card-header:hover {
+    background: #f9fafb;
+}
+
+.capex-card.expanded .capex-card-header {
+    background: linear-gradient(135deg, var(--interval-color)10, var(--interval-color)05);
+}
+
+.capex-card-icon {
+    font-size: 32px;
+    flex-shrink: 0;
+    width: 40px;
+    height: 40px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.capex-card-title {
+    flex: 1;
+    min-width: 0;
+}
+
+.capex-card-title h3 {
+    margin: 0 0 8px 0;
+    font-size: 16px;
+    font-weight: 600;
+    color: #111827;
+}
+
+.capex-card-progress {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.progress-bar {
+    flex: 1;
+    height: 8px;
+    background: #e5e7eb;
+    border-radius: 4px;
+    overflow: hidden;
+}
+
+.progress-fill {
+    height: 100%;
+    background: var(--interval-color);
+    border-radius: 4px;
+    transition: width 0.4s ease;
+}
+
+.progress-text {
+    font-size: 12px;
+    font-weight: 600;
+    color: #6b7280;
+    min-width: 45px;
+    text-align: right;
+}
+
+.capex-card-amount {
+    font-size: 20px;
+    font-weight: 700;
+    color: var(--interval-color);
+    min-width: 150px;
+    text-align: right;
+}
+
+.capex-card-toggle {
+    flex-shrink: 0;
+    width: 32px;
+    height: 32px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #9ca3af;
+    transition: transform 0.3s ease;
+}
+
+.capex-card.expanded .capex-card-toggle {
+    transform: rotate(180deg);
+}
+
+/* ============================================
+   CARD BODY (COLLAPSIBLE)
+   ============================================ */
+.capex-card-body {
+    max-height: 0;
+    overflow: hidden;
+    transition: max-height 0.4s ease, padding 0.3s ease;
+}
+
+.capex-card.expanded .capex-card-body {
+    max-height: 2000px; /* Large enough for content */
+    padding: 0 20px 20px 20px;
+}
+
+.capex-card-details {
+    animation: fadeIn 0.3s ease;
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(-10px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+.capex-card-details-empty {
+    padding: 32px;
+    text-align: center;
+    color: #9ca3af;
+    font-size: 14px;
+}
+
+/* ============================================
+   DETAILS TABLE
+   ============================================ */
+.capex-details-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 8px;
+    font-size: 13px;
+}
+
+.capex-details-table thead {
+    background: #f9fafb;
+    border-bottom: 2px solid #e5e7eb;
+}
+
+.capex-details-table th {
+    padding: 10px 12px;
+    text-align: left;
+    font-weight: 600;
+    color: #374151;
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.capex-details-table tbody tr {
+    border-bottom: 1px solid #f3f4f6;
+    transition: background 0.2s;
+}
+
+.capex-details-table tbody tr:hover {
+    background: #f9fafb;
+}
+
+.capex-details-table td {
+    padding: 12px;
+    color: #1f2937;
+}
+
+.capex-details-table tfoot {
+    border-top: 2px solid #e5e7eb;
+    background: #f9fafb;
+}
+
+.capex-details-table tfoot td {
+    padding: 12px;
+    font-size: 14px;
+}
+
+.category-badge {
+    display: inline-block;
+    padding: 3px 8px;
+    background: #dbeafe;
+    color: #1e40af;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 600;
+}
+
+.amount-cell {
+    text-align: right;
+    font-weight: 600;
+    color: var(--interval-color);
+}
+
+.percentage-cell {
+    text-align: right;
+    color: #6b7280;
+    font-weight: 500;
+}
+
+/* ============================================
+   CHART
+   ============================================ */
+.capex-chart {
+    margin-top: 32px;
+    padding: 24px;
+    background: #f9fafb;
+    border-radius: 10px;
+    border: 1px solid #e5e7eb;
+}
+
+.capex-chart h3 {
+    margin: 0 0 20px 0;
+    font-size: 18px;
+    font-weight: 600;
+    color: #111827;
+}
+
+.chart-bars {
+    display: flex;
+    align-items: flex-end;
+    gap: 16px;
+    height: 200px;
+    padding: 0 12px;
+}
+
+.chart-bar-wrapper {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    height: 100%;
+}
+
+.chart-bar {
+    width: 100%;
+    min-height: 20px;
+    border-radius: 6px 6px 0 0;
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+    padding-top: 8px;
+    transition: all 0.4s ease;
+    cursor: pointer;
+    position: relative;
+}
+
+.chart-bar:hover {
+    opacity: 0.8;
+    transform: translateY(-4px);
+}
+
+.chart-bar-value {
+    color: white;
+    font-size: 11px;
+    font-weight: 700;
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+}
+
+.chart-bar-label {
+    font-size: 12px;
+    color: #6b7280;
+    font-weight: 500;
+    text-align: center;
+    white-space: nowrap;
+}
+
+/* ============================================
+   RESPONSIVE DESIGN
+   ============================================ */
+@media (max-width: 768px) {
+    .capex-summary-header {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 12px;
+    }
+
+    .capex-card-header {
+        flex-wrap: wrap;
+        gap: 12px;
+    }
+
+    .capex-card-amount {
+        min-width: auto;
+        order: 3;
+        flex-basis: 100%;
+        text-align: left;
+        font-size: 18px;
+    }
+
+    .capex-card-toggle {
+        order: 4;
+        margin-left: auto;
+    }
+
+    .capex-details-table {
+        font-size: 12px;
+    }
+
+    .capex-details-table th,
+    .capex-details-table td {
+        padding: 8px 6px;
+    }
+
+    /* Hide less important columns on mobile */
+    .capex-details-table th:nth-child(3),
+    .capex-details-table td:nth-child(3) {
+        display: none;
+    }
+
+    .chart-bars {
+        gap: 8px;
+        height: 150px;
+    }
+
+    .chart-bar-value {
+        font-size: 10px;
+    }
+
+    .chart-bar-label {
+        font-size: 10px;
+    }
+}
+
+@media (max-width: 480px) {
+    .capex-summary-container {
+        padding: 16px;
+    }
+
+    .capex-card-header {
+        padding: 12px 16px;
+    }
+
+    .capex-card-icon {
+        font-size: 24px;
+        width: 32px;
+        height: 32px;
+    }
+
+    .capex-summary-actions {
+        flex-direction: column;
+    }
+
+    .btn-expand-all,
+    .btn-collapse-all {
+        width: 100%;
+    }
+}
+
+/* ============================================
+   PRINT STYLES
+   ============================================ */
+@media print {
+    .capex-summary-actions,
+    .capex-card-toggle {
+        display: none !important;
+    }
+
+    .capex-card {
+        page-break-inside: avoid;
+        border: 1px solid #d1d5db !important;
+    }
+
+    .capex-card-body {
+        max-height: none !important;
+        padding: 16px 20px !important;
+    }
+
+    .capex-card.expanded .capex-card-body {
+        display: block !important;
+    }
+
+    .chart-bars {
+        height: 150px;
+    }
+}
+
+/* ============================================
+   DARK MODE SUPPORT
+   ============================================ */
+@media (prefers-color-scheme: dark) {
+    .capex-summary-container {
+        background: #1f2937;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+    }
+
+    .capex-summary-header {
+        border-bottom-color: #374151;
+    }
+
+    .capex-summary-header h2,
+    .capex-summary-total strong {
+        color: #f9fafb;
+    }
+
+    .capex-card {
+        background: #111827;
+        border-color: #374151;
+    }
+
+    .capex-card-header:hover {
+        background: #1f2937;
+    }
+
+    .capex-card-title h3 {
+        color: #f9fafb;
+    }
+
+    .capex-details-table {
+        color: #e5e7eb;
+    }
+
+    .capex-details-table thead,
+    .capex-details-table tfoot {
+        background: #1f2937;
+    }
+
+    .capex-details-table tbody tr:hover {
+        background: #1f2937;
+    }
+
+    .capex-chart {
+        background: #1f2937;
+        border-color: #374151;
+    }
+
+    .capex-chart h3 {
+        color: #f9fafb;
+    }
+}

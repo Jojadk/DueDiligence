@@ -148,7 +148,7 @@ function handle_preview(array $user): array {
 }
 
 /**
- * Save report template
+ * Save report template (with scope support)
  * POST ?module=report_builder&action=save
  */
 function handle_save(array $user): array {
@@ -159,7 +159,11 @@ function handle_save(array $user): array {
         'id' => ['int', 'POST', false, null],
         'name' => ['string', 'POST', true],
         'template' => ['string', 'POST', true],
-        'report_type' => ['string', 'POST', false, 'custom']
+        'report_type' => ['string', 'POST', false, 'custom'],
+        'template_scope' => ['string', 'POST', false, 'global'],
+        'customer_id' => ['int', 'POST', false, null],
+        'project_id' => ['int', 'POST', false, null],
+        'parent_template_id' => ['int', 'POST', false, null]
     ]);
 
     if (!$validation['success']) {
@@ -168,17 +172,32 @@ function handle_save(array $user): array {
 
     $params = $validation['data'];
 
+    // Validate scope consistency
+    $scope = $params['template_scope'];
+    if ($scope === 'customer' && !$params['customer_id']) {
+        return api_error('customer_id påkrævet for customer-scoped templates');
+    }
+    if ($scope === 'project' && !$params['project_id']) {
+        return api_error('project_id påkrævet for project-scoped templates');
+    }
+
+    $templateData = [
+        'name' => $params['name'],
+        'template_content' => $params['template'],
+        'report_type' => $params['report_type'],
+        'template_scope' => $params['template_scope'],
+        'customer_id' => $params['customer_id'],
+        'project_id' => $params['project_id'],
+        'parent_template_id' => $params['parent_template_id'],
+        'updated_at' => date('Y-m-d H:i:s')
+    ];
+
     if ($params['id']) {
         // Update existing
         return api_crud_update(
             'report_templates',
             $params['id'],
-            [
-                'name' => $params['name'],
-                'template_content' => $params['template'],
-                'report_type' => $params['report_type'],
-                'updated_at' => date('Y-m-d H:i:s')
-            ],
+            $templateData,
             null,
             function($templateId) {
                 log_activity('report_template_saved', 'report_template', $templateId);
@@ -187,16 +206,13 @@ function handle_save(array $user): array {
         );
     } else {
         // Create new
+        $templateData['created_by_user_id'] = $user['id'];
+        $templateData['created_at'] = date('Y-m-d H:i:s');
+        $templateData['is_active'] = true;
+
         $result = api_crud_create(
             'report_templates',
-            [
-                'name' => $params['name'],
-                'template_content' => $params['template'],
-                'report_type' => $params['report_type'],
-                'created_by_user_id' => $user['id'],
-                'created_at' => date('Y-m-d H:i:s'),
-                'updated_at' => date('Y-m-d H:i:s')
-            ],
+            $templateData,
             null,
             function($templateId) {
                 log_activity('report_template_saved', 'report_template', $templateId);
@@ -307,31 +323,78 @@ function handle_get_template(array $user): array {
 }
 
 /**
- * Get all report templates
- * GET ?module=report_builder&action=get_templates
+ * Get all report templates (with scope filtering)
+ * GET ?module=report_builder&action=get_templates&project_id=X&scope=global|customer|project
  */
 function handle_get_templates(array $user): array {
     $validation = api_validate_params([
-        'report_type' => ['string', 'GET', false, '']
+        'report_type' => ['string', 'GET', false, ''],
+        'project_id' => ['int', 'GET', false, null],
+        'scope' => ['string', 'GET', false, ''], // Filter by scope: global, customer, project
+        'include_inactive' => ['bool', 'GET', false, false]
     ]);
 
     if (!$validation['success']) {
         return $validation;
     }
 
-    $reportType = $validation['data']['report_type'];
+    $params = $validation['data'];
 
-    $query = "SELECT * FROM report_templates";
-    $params = [];
+    // If project_id provided, use scope-aware function
+    if ($params['project_id']) {
+        $templates = db_fetch_all("
+            SELECT * FROM get_templates_for_project(:project_id, :report_type)
+        ", [
+            'project_id' => $params['project_id'],
+            'report_type' => $params['report_type'] ?: null
+        ]);
 
-    if ($reportType) {
-        $query .= " WHERE report_type = :report_type";
-        $params['report_type'] = $reportType;
+        return [
+            'success' => true,
+            'templates' => $templates
+        ];
     }
 
-    $query .= " ORDER BY name ASC";
+    // Otherwise, manual filtering
+    $query = "SELECT
+        rt.*,
+        u.name as created_by_name,
+        c.name as customer_name,
+        p.name as project_name,
+        CASE
+            WHEN rt.template_scope = 'project' THEN 1
+            WHEN rt.template_scope = 'customer' THEN 2
+            WHEN rt.template_scope = 'global' THEN 3
+        END as priority
+    FROM report_templates rt
+    LEFT JOIN users u ON rt.created_by_user_id = u.id
+    LEFT JOIN customers c ON rt.customer_id = c.id
+    LEFT JOIN projects p ON rt.project_id = p.id
+    WHERE 1=1";
 
-    $templates = db_fetch_all($query, $params);
+    $sqlParams = [];
+
+    // Filter by report type
+    if ($params['report_type']) {
+        $query .= " AND rt.report_type = :report_type";
+        $sqlParams['report_type'] = $params['report_type'];
+    }
+
+    // Filter by scope
+    if ($params['scope']) {
+        $query .= " AND rt.template_scope = :scope";
+        $sqlParams['scope'] = $params['scope'];
+    }
+
+    // Filter by active status
+    if (!$params['include_inactive']) {
+        $query .= " AND rt.is_active = TRUE";
+    }
+
+    // Order by priority and name
+    $query .= " ORDER BY priority ASC, rt.name ASC";
+
+    $templates = db_fetch_all($query, $sqlParams);
 
     return [
         'success' => true,
@@ -854,4 +917,273 @@ function handle_legacy_formatting(string $template): string {
     }, $template);
 
     return $template;
+}
+
+/**
+ * Clone template to different scope
+ * POST ?module=report_builder&action=clone_template
+ */
+function handle_clone_template(array $user): array {
+    $csrfCheck = api_require_csrf();
+    if (!$csrfCheck['success']) return $csrfCheck;
+
+    $validation = api_validate_params([
+        'source_template_id' => ['int', 'POST', true],
+        'new_scope' => ['string', 'POST', true],
+        'customer_id' => ['int', 'POST', false, null],
+        'project_id' => ['int', 'POST', false, null],
+        'new_name' => ['string', 'POST', false, null]
+    ]);
+
+    if (!$validation['success']) {
+        return $validation;
+    }
+
+    $params = $validation['data'];
+
+    // Validate scope consistency
+    if ($params['new_scope'] === 'customer' && !$params['customer_id']) {
+        return api_error('customer_id påkrævet for customer scope');
+    }
+    if ($params['new_scope'] === 'project' && !$params['project_id']) {
+        return api_error('project_id påkrævet for project scope');
+    }
+
+    try {
+        $newTemplateId = db()->query("
+            SELECT clone_template(:source_id, :new_scope, :customer_id, :project_id, :user_id) as id
+        ", [
+            'source_id' => $params['source_template_id'],
+            'new_scope' => $params['new_scope'],
+            'customer_id' => $params['customer_id'],
+            'project_id' => $params['project_id'],
+            'user_id' => $user['id']
+        ])->fetchColumn();
+
+        // Update name if provided
+        if ($params['new_name']) {
+            db()->exec("UPDATE report_templates SET name = :name WHERE id = :id", [
+                'name' => $params['new_name'],
+                'id' => $newTemplateId
+            ]);
+        }
+
+        log_activity('report_template_cloned', 'report_template', $newTemplateId);
+
+        return [
+            'success' => true,
+            'template_id' => $newTemplateId,
+            'message' => 'Template klone oprettet'
+        ];
+
+    } catch (Exception $e) {
+        return api_error('Kunne ikke klone template: ' . $e->getMessage());
+    }
+}
+
+/**
+ * Get brand settings for customer
+ * GET ?module=report_builder&action=get_brand_settings&customer_id=X
+ */
+function handle_get_brand_settings(array $user): array {
+    $validation = api_validate_params([
+        'customer_id' => ['int', 'GET', true]
+    ]);
+
+    if (!$validation['success']) {
+        return $validation;
+    }
+
+    $customerId = $validation['data']['customer_id'];
+
+    $settings = db_fetch("
+        SELECT * FROM template_brand_settings WHERE customer_id = :customer_id
+    ", ['customer_id' => $customerId]);
+
+    return [
+        'success' => true,
+        'settings' => $settings ?: [
+            'customer_id' => $customerId,
+            'primary_color' => '#1e40af',
+            'secondary_color' => '#3b82f6',
+            'accent_color' => '#60a5fa',
+            'text_color' => '#1f2937',
+            'font_family' => 'Arial, sans-serif',
+            'show_page_numbers' => true
+        ]
+    ];
+}
+
+/**
+ * Save brand settings for customer
+ * POST ?module=report_builder&action=save_brand_settings
+ */
+function handle_save_brand_settings(array $user): array {
+    $csrfCheck = api_require_csrf();
+    if (!$csrfCheck['success']) return $csrfCheck;
+
+    $validation = api_validate_params([
+        'customer_id' => ['int', 'POST', true],
+        'logo_url' => ['string', 'POST', false, null],
+        'primary_color' => ['string', 'POST', false, '#1e40af'],
+        'secondary_color' => ['string', 'POST', false, '#3b82f6'],
+        'accent_color' => ['string', 'POST', false, '#60a5fa'],
+        'text_color' => ['string', 'POST', false, '#1f2937'],
+        'font_family' => ['string', 'POST', false, 'Arial, sans-serif'],
+        'header_template' => ['string', 'POST', false, null],
+        'footer_template' => ['string', 'POST', false, null],
+        'disclaimer_text' => ['string', 'POST', false, null],
+        'copyright_text' => ['string', 'POST', false, null]
+    ]);
+
+    if (!$validation['success']) {
+        return $validation;
+    }
+
+    $params = $validation['data'];
+    $customerId = $params['customer_id'];
+    unset($params['customer_id']);
+
+    // Upsert brand settings
+    $existing = db_fetch("SELECT id FROM template_brand_settings WHERE customer_id = :customer_id", [
+        'customer_id' => $customerId
+    ]);
+
+    if ($existing) {
+        // Update
+        $params['updated_at'] = date('Y-m-d H:i:s');
+        $result = api_crud_update('template_brand_settings', $existing['id'], $params);
+    } else {
+        // Insert
+        $params['customer_id'] = $customerId;
+        $params['created_at'] = date('Y-m-d H:i:s');
+        $params['updated_at'] = date('Y-m-d H:i:s');
+        $result = api_crud_create('template_brand_settings', $params);
+    }
+
+    if ($result['success']) {
+        log_activity('brand_settings_saved', 'customer', $customerId);
+        $result['message'] = 'Brand indstillinger gemt';
+    }
+
+    return $result;
+}
+
+/**
+ * Render with Advanced Template Parser
+ * POST ?module=report_builder&action=render_advanced
+ */
+function handle_render_advanced(array $user): array {
+    require_once __DIR__ . '/../../core/advanced_template_parser.php';
+    require_once __DIR__ . '/../../core/silent_fail_handler.php';
+
+    $csrfCheck = api_require_csrf();
+    if (!$csrfCheck['success']) return $csrfCheck;
+
+    $validation = api_validate_params([
+        'project_id' => ['int', 'POST', true],
+        'template_id' => ['int', 'POST', true]
+    ]);
+
+    if (!$validation['success']) {
+        return $validation;
+    }
+
+    $params = $validation['data'];
+
+    // Check project access
+    $accessCheck = api_require_project_access($user, $params['project_id'], 'viewer');
+    if (!$accessCheck['success']) {
+        return $accessCheck;
+    }
+
+    // Get template with brand settings
+    $template = db_fetch("
+        SELECT
+            rt.*,
+            tbs.primary_color,
+            tbs.secondary_color,
+            tbs.logo_url,
+            tbs.header_template,
+            tbs.footer_template,
+            tbs.disclaimer_text
+        FROM report_templates rt
+        LEFT JOIN projects p ON rt.project_id = p.id OR rt.customer_id = p.customer_id
+        LEFT JOIN template_brand_settings tbs ON rt.customer_id = tbs.customer_id
+        WHERE rt.id = :id
+    ", ['id' => $params['template_id']]);
+
+    if (!$template) {
+        return api_error('Template ikke fundet');
+    }
+
+    // Get project data
+    $data = get_report_data($params['project_id']);
+
+    // Add brand settings to data
+    $data['brand'] = [
+        'primary_color' => $template['primary_color'] ?? '#1e40af',
+        'secondary_color' => $template['secondary_color'] ?? '#3b82f6',
+        'logo_url' => $template['logo_url'] ?? '',
+        'disclaimer' => $template['disclaimer_text'] ?? ''
+    ];
+
+    // Create advanced parser with context
+    $startTime = microtime(true);
+    $parser = new AdvancedTemplateParser($data, [
+        'project_id' => $params['project_id'],
+        'customer_id' => $data['project']['customer_id'] ?? null,
+        'template_id' => $params['template_id']
+    ]);
+
+    // Render template
+    $rendered = $parser->parse($template['template_content']);
+    $parser->flush(); // Flush error logs
+
+    $renderDuration = (int)((microtime(true) - $startTime) * 1000); // milliseconds
+
+    // Calculate output size
+    $outputSizeKb = (int)(strlen($rendered) / 1024);
+
+    return api_transaction(
+        function() use ($params, $data, $template, $rendered, $user, $renderDuration, $outputSizeKb, $parser) {
+            // Save rendered report
+            $reportId = db_insert('reports', [
+                'project_id' => $params['project_id'],
+                'title' => $data['project']['name'] . ' - ' . $template['name'],
+                'report_type' => $template['report_type'],
+                'rich_text_content' => $rendered,
+                'wysiwyg_enabled' => true,
+                'generated_by_user_id' => $user['id'],
+                'created_at' => date('Y-m-d H:i:s')
+            ]);
+
+            // Log template usage
+            db_insert('template_usage_log', [
+                'template_id' => $params['template_id'],
+                'report_id' => $reportId,
+                'user_id' => $user['id'],
+                'project_id' => $params['project_id'],
+                'customer_id' => $data['project']['customer_id'] ?? null,
+                'render_duration_ms' => $renderDuration,
+                'error_count' => $parser->getErrorCount(),
+                'output_size_kb' => $outputSizeKb,
+                'used_at' => date('Y-m-d H:i:s')
+            ]);
+
+            log_activity('report_rendered_advanced', 'report', $reportId);
+
+            return [
+                'report_id' => $reportId,
+                'rendered' => $rendered,
+                'metrics' => [
+                    'render_duration_ms' => $renderDuration,
+                    'error_count' => $parser->getErrorCount(),
+                    'output_size_kb' => $outputSizeKb
+                ]
+            ];
+        },
+        'Rapport genereret',
+        'Kunne ikke gemme rapport'
+    );
 }

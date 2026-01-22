@@ -1,0 +1,529 @@
+/**
+ * Live Preview System Styling
+ * Provides split-view interface for template editing
+ */
+
+/* ============================================
+   SPLIT VIEW CONTAINER
+   ============================================ */
+.split-view-container {
+    --editor-width: 50%;
+    --resizer-width: 4px;
+    --toolbar-height: 50px;
+
+    display: flex;
+    flex-direction: column;
+    height: calc(100vh - 100px);
+    background: #f9fafb;
+    border-radius: 8px;
+    overflow: hidden;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+/* ============================================
+   TOOLBAR
+   ============================================ */
+.live-preview-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 16px;
+    height: var(--toolbar-height);
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.live-preview-toolbar h2 {
+    margin: 0;
+    font-size: 16px;
+    font-weight: 600;
+}
+
+.toolbar-actions {
+    display: flex;
+    gap: 8px;
+}
+
+.toolbar-btn {
+    padding: 6px 12px;
+    background: rgba(255, 255, 255, 0.2);
+    border: 1px solid rgba(255, 255, 255, 0.3);
+    border-radius: 4px;
+    color: white;
+    font-size: 13px;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.toolbar-btn:hover {
+    background: rgba(255, 255, 255, 0.3);
+    border-color: rgba(255, 255, 255, 0.5);
+}
+
+.toolbar-btn:active {
+    transform: translateY(1px);
+}
+
+.toolbar-btn i {
+    margin-right: 4px;
+}
+
+/* Primary button */
+.toolbar-btn-primary {
+    background: #10b981;
+    border-color: #059669;
+}
+
+.toolbar-btn-primary:hover {
+    background: #059669;
+}
+
+/* ============================================
+   SPLIT VIEW LAYOUT
+   ============================================ */
+.split-view-main {
+    display: flex;
+    flex: 1;
+    overflow: hidden;
+}
+
+.split-view-editor,
+.split-view-preview {
+    flex-shrink: 0;
+    overflow: auto;
+    background: white;
+}
+
+.split-view-editor {
+    width: var(--editor-width);
+    border-right: var(--resizer-width) solid #e5e7eb;
+}
+
+.split-view-preview {
+    flex: 1;
+}
+
+/* Editor textarea */
+#template-editor {
+    width: 100%;
+    height: 100%;
+    padding: 20px;
+    border: none;
+    outline: none;
+    font-family: 'Monaco', 'Menlo', 'Courier New', monospace;
+    font-size: 14px;
+    line-height: 1.6;
+    resize: none;
+    background: #ffffff;
+    color: #1f2937;
+    tab-size: 4;
+}
+
+#template-editor::placeholder {
+    color: #9ca3af;
+}
+
+/* Preview container */
+#template-preview {
+    padding: 40px;
+    max-width: 900px;
+    margin: 0 auto;
+    font-family: 'Arial', sans-serif;
+    line-height: 1.8;
+    color: #1f2937;
+}
+
+#template-preview.loading {
+    opacity: 0.5;
+    pointer-events: none;
+    position: relative;
+}
+
+#template-preview.loading::before {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 40px;
+    height: 40px;
+    margin: -20px 0 0 -20px;
+    border: 3px solid #e5e7eb;
+    border-top-color: #667eea;
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}
+
+/* ============================================
+   SPLIT VIEW RESIZER
+   ============================================ */
+.split-view-resizer {
+    position: absolute;
+    top: var(--toolbar-height);
+    left: var(--editor-width);
+    width: var(--resizer-width);
+    height: calc(100% - var(--toolbar-height));
+    background: #e5e7eb;
+    cursor: col-resize;
+    z-index: 10;
+    transition: background 0.2s;
+}
+
+.split-view-resizer:hover {
+    background: #667eea;
+}
+
+.split-view-resizer::before {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 12px;
+    height: 40px;
+    margin: -20px 0 0 -6px;
+    background: white;
+    border-radius: 4px;
+    opacity: 0;
+    transition: opacity 0.2s;
+}
+
+.split-view-resizer:hover::before {
+    opacity: 1;
+}
+
+/* ============================================
+   PREVIEW-ONLY MODE
+   ============================================ */
+.split-view-container.preview-only .split-view-editor {
+    display: none;
+}
+
+.split-view-container.preview-only .split-view-preview {
+    width: 100%;
+}
+
+.split-view-container.preview-only .split-view-resizer {
+    display: none;
+}
+
+/* ============================================
+   STATUS BAR
+   ============================================ */
+.live-preview-status {
+    padding: 8px 16px;
+    font-size: 12px;
+    text-align: center;
+    background: #f3f4f6;
+    border-top: 1px solid #e5e7eb;
+    color: #6b7280;
+}
+
+.status-success {
+    background: #d1fae5;
+    color: #065f46;
+    border-color: #a7f3d0;
+}
+
+.status-error {
+    background: #fee2e2;
+    color: #991b1b;
+    border-color: #fca5a5;
+}
+
+.status-info {
+    background: #dbeafe;
+    color: #1e40af;
+    border-color: #93c5fd;
+}
+
+/* ============================================
+   VARIABLE INSERTER MODAL
+   ============================================ */
+.variable-inserter-modal {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 1000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.variable-inserter-modal .modal-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.5);
+    backdrop-filter: blur(4px);
+}
+
+.variable-inserter-modal .modal-content {
+    position: relative;
+    width: 90%;
+    max-width: 700px;
+    max-height: 80vh;
+    background: white;
+    border-radius: 12px;
+    box-shadow: 0 25px 50px rgba(0, 0, 0, 0.3);
+    display: flex;
+    flex-direction: column;
+}
+
+.variable-inserter-modal .modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 20px 24px;
+    border-bottom: 1px solid #e5e7eb;
+}
+
+.variable-inserter-modal .modal-header h3 {
+    margin: 0;
+    font-size: 18px;
+    font-weight: 600;
+    color: #1f2937;
+}
+
+.variable-inserter-modal .modal-close {
+    width: 32px;
+    height: 32px;
+    border: none;
+    background: #f3f4f6;
+    border-radius: 6px;
+    font-size: 24px;
+    line-height: 1;
+    cursor: pointer;
+    color: #6b7280;
+    transition: all 0.2s;
+}
+
+.variable-inserter-modal .modal-close:hover {
+    background: #e5e7eb;
+    color: #1f2937;
+}
+
+.variable-inserter-modal .modal-body {
+    padding: 20px 24px;
+    overflow-y: auto;
+    flex: 1;
+}
+
+.variable-search {
+    width: 100%;
+    padding: 12px 16px;
+    border: 2px solid #e5e7eb;
+    border-radius: 8px;
+    font-size: 14px;
+    margin-bottom: 20px;
+    transition: border-color 0.2s;
+}
+
+.variable-search:focus {
+    outline: none;
+    border-color: #667eea;
+}
+
+.variable-category {
+    margin-bottom: 24px;
+}
+
+.variable-category h4 {
+    margin: 0 0 12px 0;
+    font-size: 14px;
+    font-weight: 600;
+    color: #667eea;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.variable-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 12px;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.2s;
+    margin-bottom: 4px;
+}
+
+.variable-item:hover {
+    background: #f3f4f6;
+}
+
+.variable-item code {
+    flex-shrink: 0;
+    padding: 4px 8px;
+    background: #f9fafb;
+    border: 1px solid #e5e7eb;
+    border-radius: 4px;
+    font-family: 'Monaco', 'Menlo', 'Courier New', monospace;
+    font-size: 12px;
+    color: #667eea;
+    font-weight: 600;
+}
+
+.variable-item span {
+    flex: 1;
+    font-size: 13px;
+    color: #6b7280;
+}
+
+.variable-loop {
+    padding: 12px;
+    background: #fffbeb;
+    border: 1px solid #fbbf24;
+    border-radius: 6px;
+    margin-bottom: 8px;
+}
+
+.variable-loop code {
+    font-family: 'Monaco', 'Menlo', 'Courier New', monospace;
+    font-size: 13px;
+    color: #92400e;
+}
+
+.variable-examples {
+    padding: 12px;
+    background: #f9fafb;
+    border-radius: 6px;
+    border: 1px dashed #d1d5db;
+}
+
+/* ============================================
+   RESPONSIVE DESIGN
+   ============================================ */
+@media (max-width: 1024px) {
+    .split-view-container {
+        --editor-width: 40%;
+    }
+
+    #template-preview {
+        padding: 20px;
+    }
+}
+
+@media (max-width: 768px) {
+    .split-view-main {
+        flex-direction: column;
+    }
+
+    .split-view-editor,
+    .split-view-preview {
+        width: 100% !important;
+    }
+
+    .split-view-editor {
+        height: 40vh;
+        border-right: none;
+        border-bottom: 2px solid #e5e7eb;
+    }
+
+    .split-view-resizer {
+        display: none;
+    }
+
+    .live-preview-toolbar {
+        flex-wrap: wrap;
+        height: auto;
+        padding: 12px;
+    }
+
+    .toolbar-actions {
+        width: 100%;
+        margin-top: 8px;
+        justify-content: flex-end;
+    }
+}
+
+/* ============================================
+   PRINT STYLES
+   ============================================ */
+@media print {
+    .split-view-toolbar,
+    .split-view-editor,
+    .split-view-resizer,
+    .live-preview-status {
+        display: none !important;
+    }
+
+    .split-view-preview {
+        width: 100% !important;
+        max-width: none !important;
+        padding: 0 !important;
+    }
+}
+
+/* ============================================
+   PREVIEW CONTENT STYLING
+   ============================================ */
+#template-preview h1 {
+    font-size: 32px;
+    font-weight: 700;
+    margin-bottom: 24px;
+    color: #111827;
+}
+
+#template-preview h2 {
+    font-size: 24px;
+    font-weight: 600;
+    margin-top: 40px;
+    margin-bottom: 16px;
+    color: #1f2937;
+    border-bottom: 2px solid #e5e7eb;
+    padding-bottom: 8px;
+}
+
+#template-preview h3 {
+    font-size: 18px;
+    font-weight: 600;
+    margin-top: 24px;
+    margin-bottom: 12px;
+    color: #374151;
+}
+
+#template-preview table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 20px 0;
+}
+
+#template-preview th {
+    background: #f3f4f6;
+    padding: 12px;
+    text-align: left;
+    font-weight: 600;
+    border-bottom: 2px solid #d1d5db;
+}
+
+#template-preview td {
+    padding: 12px;
+    border-bottom: 1px solid #e5e7eb;
+}
+
+#template-preview figure {
+    margin: 24px 0;
+    text-align: center;
+}
+
+#template-preview figcaption {
+    margin-top: 8px;
+    font-size: 13px;
+    color: #6b7280;
+    font-style: italic;
+}
+
+#template-preview img {
+    max-width: 100%;
+    height: auto;
+    border-radius: 4px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
