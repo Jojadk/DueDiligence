@@ -122,30 +122,26 @@ const ImageUpload = {
         const preview = document.getElementById('filePreview');
         const uploadBtn = document.getElementById('uploadBtn');
 
+        // Validate files using centralized Validation library
+        const validation = Validation.files(files, 'image', { maxFiles: 50 });
+        if (!validation.valid) {
+            this.showError(validation.error);
+            return;
+        }
+
         preview.innerHTML = '';
         preview.style.display = 'grid';
 
         Array.from(files).forEach((file, index) => {
-            if (!file.type.startsWith('image/')) {
-                this.showError(`${file.name} er ikke et billede`);
-                return;
-            }
-
-            // Check file size (max 10MB)
-            if (file.size > 10 * 1024 * 1024) {
-                this.showError(`${file.name} er for stor (max 10MB)`);
-                return;
-            }
-
             const reader = new FileReader();
             reader.onload = (e) => {
                 const previewItem = document.createElement('div');
                 previewItem.className = 'preview-item';
                 previewItem.innerHTML = `
-                    <img src="${e.target.result}" alt="${escapeHtml(file.name)}">
+                    <img src="${e.target.result}" alt="${Validation.Validation.escapeHtml(file.name)}">
                     <div class="preview-info">
-                        <div class="preview-name">${escapeHtml(file.name)}</div>
-                        <div class="preview-size">${this.formatFileSize(file.size)}</div>
+                        <div class="preview-name">${Validation.Validation.escapeHtml(file.name)}</div>
+                        <div class="preview-size">${Validation.formatFileSize(file.size)}</div>
                     </div>
                 `;
                 preview.appendChild(previewItem);
@@ -220,7 +216,7 @@ const ImageUpload = {
             if (response.success) {
                 this.renderGallery(response.images, container, entityType, entityId);
             } else {
-                container.innerHTML = `<div class="error-state">${escapeHtml(response.error)}</div>`;
+                container.innerHTML = `<div class="error-state">${Validation.escapeHtml(response.error)}</div>`;
             }
         } catch (error) {
             console.error('Gallery load error:', error);
@@ -253,18 +249,18 @@ const ImageUpload = {
                     <div class="image-drag-handle" title="Træk for at ændre rækkefølge">
                         ${this.getIcon('menu', 14)}
                     </div>
-                    <img src="${escapeHtml(img.thumbnail_path || img.file_path)}"
-                         alt="${escapeHtml(img.description || '')}"
-                         onclick="ImageUpload.viewImage('${escapeHtml(img.file_path)}', '${escapeHtml(img.description || '')}')">
+                    <img src="${Validation.escapeHtml(img.thumbnail_path || img.file_path)}"
+                         alt="${Validation.escapeHtml(img.description || '')}"
+                         onclick="ImageUpload.viewImage('${Validation.escapeHtml(img.file_path)}', '${Validation.escapeHtml(img.description || '')}')">
                     <div class="gallery-actions">
-                        <button class="btn-icon" onclick="ImageUpload.viewImage('${escapeHtml(img.file_path)}', '${escapeHtml(img.description || '')}')" title="Vis">
+                        <button class="btn-icon" onclick="ImageUpload.viewImage('${Validation.escapeHtml(img.file_path)}', '${Validation.escapeHtml(img.description || '')}')" title="Vis">
                             ${this.getIcon('eye', 16)}
                         </button>
                         <button class="btn-icon btn-icon-danger" onclick="ImageUpload.deleteImage(${img.id}, '${entityType}', ${entityId}, '.${container.className}')" title="Slet">
                             ${this.getIcon('trash', 16)}
                         </button>
                     </div>
-                    ${img.description ? `<div class="gallery-caption">${escapeHtml(img.description)}</div>` : ''}
+                    ${img.description ? `<div class="gallery-caption">${Validation.escapeHtml(img.description)}</div>` : ''}
                 </div>
             `;
         });
@@ -374,8 +370,8 @@ const ImageUpload = {
     viewImage(imagePath, description) {
         const content = `
             <div class="image-viewer">
-                <img src="${escapeHtml(imagePath)}" alt="${escapeHtml(description)}">
-                ${description ? `<p class="image-description">${escapeHtml(description)}</p>` : ''}
+                <img src="${Validation.escapeHtml(imagePath)}" alt="${Validation.escapeHtml(description)}">
+                ${description ? `<p class="image-description">${Validation.escapeHtml(description)}</p>` : ''}
             </div>
         `;
 
@@ -419,7 +415,7 @@ const ImageUpload = {
     showError(message) {
         const errorsEl = document.getElementById('uploadErrors');
         if (errorsEl) {
-            errorsEl.innerHTML = `<div class="alert alert-error">${escapeHtml(message)}</div>`;
+            errorsEl.innerHTML = `<div class="alert alert-error">${Validation.escapeHtml(message)}</div>`;
             errorsEl.style.display = 'block';
         }
     },
