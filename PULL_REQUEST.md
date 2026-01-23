@@ -42,6 +42,30 @@ Denne PR implementerer omfattende API optimering med konsoliderede helper functi
 - Dependency management
 - Intersection Observer for lazy loading
 
+**`core/api-router.php`** (296 linjer): Central API routing system
+- Centraliseret routing af alle modul API requests
+- Konsistent error handling og logging
+- Automatisk validering af modul/action navne
+- Development mode debugging med stack traces
+- Request timing og execution metadata
+- Helper funktioner: `validate_api_params()`, `require_api_csrf()`, `require_api_project_access()`
+- Automatic error logging med user context
+
+**`core/modal-builder.php`** (391 linjer): Standardiseret modal system
+- PHP backend modal builder med fluent API
+- Type helpers: `form()`, `confirm()`, `alert()`, `table()`
+- Konsistent header, body, footer struktur
+- 4 størrelser: small, medium, large, xlarge
+- Standardiseret button placering og styling
+- Accessibility compliance (ARIA labels)
+
+**`assets/js/modal-builder.js`** (433 linjer): JavaScript modal builder
+- Frontend counterpart til PHP modal builder
+- Promise-based `confirm()` og `alert()` methods
+- Event handlers og callbacks (`onShow`, `onClose`, `onClick`)
+- Automatisk cleanup af event listeners
+- Samme API som PHP version for konsistens
+
 ### ✅ Migrerede Moduler (19 af 21 - 91% færdig)
 
 **Phase 1: Initial Migration (10 moduler)**
@@ -101,7 +125,28 @@ Denne PR implementerer omfattende API optimering med konsoliderede helper functi
 - Troubleshooting guide
 - Best practices
 
+**`docs/API_ROUTER_GUIDE.md`** (661 linjer): Central API router dokumentation
+- Complete architecture overview
+- Usage eksempler for både routing og handlers
+- Helper function reference
+- Security features (CSRF, permissions, rate limiting)
+- Error handling og debugging
+- Performance monitoring og caching strategies
+- Migration guide fra old pattern
+- Complete CRUD module eksempel
+
+**`docs/MODAL_BUILDER_GUIDE.md`** (844 linjer): Modal system dokumentation
+- PHP og JavaScript usage guides
+- Configuration options reference
+- Standard modal types (form, confirm, alert, table)
+- Styling guidelines og CSS classes
+- Best practices for UX konsistens
+- Accessibility compliance guide
+- Complete real-world eksempler
+- Migration guide fra old pattern
+
 **`docs/N+1_QUERY_OPTIMIZATION.md`** (367 linjer): Detaljeret N+1 analyse
+**`docs/JAVASCRIPT_VALIDATION_GUIDE.md`** (378 linjer): Client-side validation
 **`CODE_ANALYSIS.md`** (131 linjer): Codebase analyse
 **`docs/OPTIMIZATION_REPORT.md`**: Endelige resultater
 
@@ -125,19 +170,27 @@ Denne PR implementerer omfattende API optimering med konsoliderede helper functi
 - **Standardiserede CRUD**: api_crud_create/update/delete erstatter hundredvis af linjer
 - **Automatic transactions**: Transaction management med automatic rollback
 - **83% mindre CRUD kode**: ~30 linjer → ~5 linjer per operation
+- **Central API routing**: Én entry point for alle module requests
+- **Standardiserede modals**: Ensartet UI/UX på tværs af hele systemet
+- **DRY principles**: Modal og API patterns genbruges konsistent
 
 ### 🔒 Security
 - **100% CSRF protection** på alle POST endpoints
 - Consistent input sanitization via validation helpers
 - Standardiseret permission checking med `api_require_project_access()`
 - CSP-compliant HTML (ingen inline JavaScript)
+- **API route validation**: Automatisk validering af modul/action navne
+- **Rate limiting helpers**: `api_require_rate_limit()` for DoS protection
 
 ### 🚀 Maintainability
 - Lettere at tilføje nye endpoints (3 linjer vs 30 linjer)
 - Ændringer i validation logic sker ét sted
 - Bedre testbarhed gennem helper functions
 - Konsistent kode-struktur på tværs af 19 moduler
-- Comprehensive documentation (2,000+ linjer)
+- Comprehensive documentation (4,500+ linjer)
+- **Central modal system**: Ingen duplicate modal HTML
+- **Fluent API design**: Intuitive builder patterns for både PHP og JS
+- **Type-safe modals**: Pre-configured form, confirm, alert, table types
 
 ## 🔄 Før/Efter Eksempler
 
