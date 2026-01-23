@@ -44,10 +44,9 @@ function handle_upload(array $user): array {
     $csrfCheck = api_require_csrf();
     if (!$csrfCheck['success']) return $csrfCheck;
 
-    $validation = api_validate_params($_POST, [
-        'element_id' => ['type' => 'int', 'required' => true, 'error' => 'Element ID mangler']
-    ], [
-        'description' => ['type' => 'string', 'required' => false, 'default' => '']
+    $validation = api_validate_params([
+        'element_id' => ['int', 'POST', true],
+        'description' => ['string', 'POST', false, '']
     ]);
     if (!$validation['success']) return $validation;
 
@@ -167,11 +166,10 @@ function handle_upload(array $user): array {
  * GET ?module=image&action=get_list&element_id=X
  */
 function handle_get_list(array $user): array {
-    $validation = api_validate_params($_GET, [
-        'element_id' => ['type' => 'int', 'required' => true, 'error' => 'Element ID mangler']
-    ], [
-        'page' => ['type' => 'int', 'required' => false, 'default' => 1],
-        'limit' => ['type' => 'int', 'required' => false, 'default' => 50]
+    $validation = api_validate_params([
+        'element_id' => ['int', 'GET', true],
+        'page' => ['int', 'GET', false, 1],
+        'limit' => ['int', 'GET', false, 50]
     ]);
     if (!$validation['success']) return $validation;
 
@@ -234,8 +232,8 @@ function handle_get_list(array $user): array {
  * GET ?module=image&action=get_image&id=X
  */
 function handle_get_image(array $user): array {
-    $validation = api_validate_params($_GET, [
-        'id' => ['type' => 'int', 'required' => true, 'error' => 'Billede ID mangler']
+    $validation = api_validate_params([
+        'id' => ['int', 'GET', true]
     ]);
     if (!$validation['success']) return $validation;
 
@@ -277,8 +275,9 @@ function handle_update(array $user): array {
     $csrfCheck = api_require_csrf();
     if (!$csrfCheck['success']) return $csrfCheck;
 
-    $validation = api_validate_params($_POST, [
-        'id' => ['type' => 'int', 'required' => true, 'error' => 'Billede ID mangler']
+    $validation = api_validate_params([
+        'id' => ['int', 'POST', true],
+        'description' => ['string', 'POST', false]
     ]);
     if (!$validation['success']) return $validation;
 
@@ -301,20 +300,17 @@ function handle_update(array $user): array {
     $accessCheck = api_require_project_access($user, $image['project_id'], 'editor');
     if (!$accessCheck['success']) return $accessCheck;
 
-    return api_transaction(function() use ($imageId) {
-        $updateData = [];
+    $updateData = [];
+    if (isset($validation['data']['description'])) {
+        $updateData['description'] = $validation['data']['description'];
+    }
 
-        if (isset($_POST['description'])) {
-            $updateData['description'] = sanitize_string($_POST['description']);
-        }
+    if (empty($updateData)) {
+        return api_error('Ingen data at opdatere');
+    }
 
-        if (isset($_POST['tags'])) {
-            $updateData['tags'] = sanitize_string($_POST['tags']);
-        }
-
-        if (!empty($updateData)) {
-            db_update('element_images', $updateData, 'id = :id', ['id' => $imageId]);
-        }
+    return api_transaction(function() use ($imageId, $updateData) {
+        db_update('element_images', $updateData, 'id = :id', ['id' => $imageId]);
 
         log_activity('image_updated', 'image', $imageId);
 
@@ -333,8 +329,8 @@ function handle_delete(array $user): array {
     $csrfCheck = api_require_csrf();
     if (!$csrfCheck['success']) return $csrfCheck;
 
-    $validation = api_validate_params($_POST, [
-        'id' => ['type' => 'int', 'required' => true, 'error' => 'Billede ID mangler']
+    $validation = api_validate_params([
+        'id' => ['int', 'POST', true]
     ]);
     if (!$validation['success']) return $validation;
 
@@ -396,8 +392,8 @@ function handle_reorder(array $user): array {
     $csrfCheck = api_require_csrf();
     if (!$csrfCheck['success']) return $csrfCheck;
 
-    $validation = api_validate_params($_POST, [
-        'element_id' => ['type' => 'int', 'required' => true, 'error' => 'Element ID mangler']
+    $validation = api_validate_params([
+        'element_id' => ['int', 'POST', true]
     ]);
     if (!$validation['success']) return $validation;
 
@@ -451,8 +447,8 @@ function handle_set_primary(array $user): array {
     $csrfCheck = api_require_csrf();
     if (!$csrfCheck['success']) return $csrfCheck;
 
-    $validation = api_validate_params($_POST, [
-        'id' => ['type' => 'int', 'required' => true, 'error' => 'Billede ID mangler']
+    $validation = api_validate_params([
+        'id' => ['int', 'POST', true]
     ]);
     if (!$validation['success']) return $validation;
 
@@ -507,8 +503,8 @@ function handle_bulk_upload(array $user): array {
     $csrfCheck = api_require_csrf();
     if (!$csrfCheck['success']) return $csrfCheck;
 
-    $validation = api_validate_params($_POST, [
-        'element_id' => ['type' => 'int', 'required' => true, 'error' => 'Element ID mangler']
+    $validation = api_validate_params([
+        'element_id' => ['int', 'POST', true]
     ]);
     if (!$validation['success']) return $validation;
 
@@ -648,8 +644,8 @@ function handle_bulk_upload(array $user): array {
  * GET ?module=image&action=get_gallery&element_id=X
  */
 function handle_get_gallery(array $user): array {
-    $validation = api_validate_params($_GET, [
-        'element_id' => ['type' => 'int', 'required' => true, 'error' => 'Element ID mangler']
+    $validation = api_validate_params([
+        'element_id' => ['int', 'GET', true]
     ]);
     if (!$validation['success']) return $validation;
 
@@ -716,8 +712,8 @@ function handle_save_annotations(array $user): array {
     $csrfCheck = api_require_csrf();
     if (!$csrfCheck['success']) return $csrfCheck;
 
-    $validation = api_validate_params($_POST, [
-        'id' => ['type' => 'int', 'required' => true, 'error' => 'Billede ID mangler']
+    $validation = api_validate_params([
+        'id' => ['int', 'POST', true]
     ]);
     if (!$validation['success']) return $validation;
 
@@ -768,8 +764,8 @@ function handle_save_annotations(array $user): array {
  * GET ?module=image&action=get_annotations&id=X
  */
 function handle_get_annotations(array $user): array {
-    $validation = api_validate_params($_GET, [
-        'id' => ['type' => 'int', 'required' => true, 'error' => 'Billede ID mangler']
+    $validation = api_validate_params([
+        'id' => ['int', 'GET', true]
     ]);
     if (!$validation['success']) return $validation;
 
@@ -928,8 +924,8 @@ function handle_export_annotated(array $user): array {
     $csrfCheck = api_require_csrf();
     if (!$csrfCheck['success']) return $csrfCheck;
 
-    $validation = api_validate_params($_POST, [
-        'id' => ['type' => 'int', 'required' => true, 'error' => 'Billede ID mangler']
+    $validation = api_validate_params([
+        'id' => ['int', 'POST', true]
     ]);
     if (!$validation['success']) return $validation;
 

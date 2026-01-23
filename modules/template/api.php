@@ -68,9 +68,11 @@ function handle_get_templates(array $user): array {
  * GET ?module=template&action=get_template&id=X
  */
 function handle_get_template(array $user): array {
-    $validation = api_validate_params(['id' => 'required|int'], $_GET);
+    $validation = api_validate_params([
+        'id' => ['int', 'GET', true]
+    ]);
     if (!$validation['success']) return $validation;
-    $templateId = $validation['params']['id'];
+    $templateId = $validation['data']['id'];
 
     $template = db_fetch("
         SELECT * FROM budget_templates WHERE id = :id
@@ -107,44 +109,38 @@ function handle_get_template(array $user): array {
  * POST ?module=template&action=create_template
  */
 function handle_create_template(array $user): array {
-    $csrfCheck = api_require_csrf();
-    if (!$csrfCheck['success']) return $csrfCheck;
-
     $validation = api_validate_params([
-        'name' => 'required',
-        'budget_type' => 'required',
-        'description' => 'optional',
-        'category' => 'optional'
-    ], $_POST);
+        'name' => ['string', 'POST', true],
+        'budget_type' => ['string', 'POST', true],
+        'description' => ['string', 'POST', false, ''],
+        'category' => ['string', 'POST', false, '']
+    ]);
     if (!$validation['success']) return $validation;
-    $params = $validation['params'];
+    $params = $validation['data'];
 
     if (!in_array($params['budget_type'], ['capex', 'opex', 'reinstatement'])) {
         return api_error('Ugyldig budget type');
     }
 
-    return api_transaction(function() use ($user, $params) {
-        $templateData = [
+    return api_crud_create(
+        'budget_templates',
+        [],
+        [
             'name' => $params['name'],
-            'description' => $params['description'] ?? '',
+            'description' => $params['description'],
             'budget_type' => $params['budget_type'],
-            'category' => $params['category'] ?? '',
-            'is_active' => true,
-            'created_by_user_id' => $user['id'],
-            'created_at' => date('Y-m-d H:i:s'),
-            'updated_at' => date('Y-m-d H:i:s')
-        ];
-
-        $templateId = db_insert('budget_templates', $templateData);
-
-        log_activity('template_created', 'template', $templateId);
-
-        return [
-            'success' => true,
-            'template_id' => $templateId,
-            'message' => 'Template oprettet'
-        ];
-    }, 'Kunne ikke oprette template');
+            'category' => $params['category'],
+            'is_active' => true
+        ],
+        function($templateId) {
+            log_activity('template_created', 'template', $templateId);
+            return [
+                'template_id' => $templateId,
+                'message' => 'Template oprettet'
+            ];
+        },
+        'template'
+    );
 }
 
 /**
@@ -152,43 +148,32 @@ function handle_create_template(array $user): array {
  * POST ?module=template&action=update_template
  */
 function handle_update_template(array $user): array {
-    $csrfCheck = api_require_csrf();
-    if (!$csrfCheck['success']) return $csrfCheck;
-
-    $validation = api_validate_params(['id' => 'required|int'], $_POST);
+    $validation = api_validate_params([
+        'id' => ['int', 'POST', true],
+        'name' => ['string', 'POST', false],
+        'description' => ['string', 'POST', false],
+        'category' => ['string', 'POST', false],
+        'is_active' => ['bool', 'POST', false]
+    ]);
     if (!$validation['success']) return $validation;
-    $templateId = $validation['params']['id'];
+    $params = $validation['data'];
 
-    return api_transaction(function() use ($templateId) {
-        $updateData = ['updated_at' => date('Y-m-d H:i:s')];
+    $templateId = $params['id'];
+    unset($params['id']);
 
-        if (isset($_POST['name'])) {
-            $updateData['name'] = sanitize_string($_POST['name']);
+    if (empty($params)) {
+        return api_error('Ingen data at opdatere');
+    }
+
+    return api_crud_update(
+        'budget_templates',
+        $templateId,
+        $params,
+        null,
+        function($templateId) {
+            log_activity('template_updated', 'template', $templateId);
         }
-
-        if (isset($_POST['description'])) {
-            $updateData['description'] = sanitize_string($_POST['description']);
-        }
-
-        if (isset($_POST['category'])) {
-            $updateData['category'] = sanitize_string($_POST['category']);
-        }
-
-        if (isset($_POST['is_active'])) {
-            $updateData['is_active'] = (bool)$_POST['is_active'];
-        }
-
-        if (!empty($updateData)) {
-            db_update('budget_templates', $updateData, 'id = :id', ['id' => $templateId]);
-        }
-
-        log_activity('template_updated', 'template', $templateId);
-
-        return [
-            'success' => true,
-            'message' => 'Template opdateret'
-        ];
-    }, 'Kunne ikke opdatere template');
+    );
 }
 
 /**
@@ -196,27 +181,22 @@ function handle_update_template(array $user): array {
  * POST ?module=template&action=delete_template
  */
 function handle_delete_template(array $user): array {
-    $csrfCheck = api_require_csrf();
-    if (!$csrfCheck['success']) return $csrfCheck;
-
-    $validation = api_validate_params(['id' => 'required|int'], $_POST);
+    $validation = api_validate_params([
+        'id' => ['int', 'POST', true]
+    ]);
     if (!$validation['success']) return $validation;
-    $templateId = $validation['params']['id'];
+    $templateId = $validation['data']['id'];
 
-    return api_transaction(function() use ($templateId) {
-        // Delete template items
-        db_execute("DELETE FROM budget_template_items WHERE template_id = :id", ['id' => $templateId]);
-
-        // Delete template
-        db_delete('budget_templates', 'id = :id', ['id' => $templateId]);
-
-        log_activity('template_deleted', 'template', $templateId);
-
-        return [
-            'success' => true,
-            'message' => 'Template slettet'
-        ];
-    }, 'Kunne ikke slette template');
+    return api_crud_delete(
+        'budget_templates',
+        $templateId,
+        null,
+        function($templateId) {
+            // Delete template items
+            db_execute("DELETE FROM budget_template_items WHERE template_id = :id", ['id' => $templateId]);
+            log_activity('template_deleted', 'template', $templateId);
+        }
+    );
 }
 
 /**
@@ -228,11 +208,11 @@ function handle_duplicate_template(array $user): array {
     if (!$csrfCheck['success']) return $csrfCheck;
 
     $validation = api_validate_params([
-        'id' => 'required|int',
-        'new_name' => 'optional'
-    ], $_POST);
+        'id' => ['int', 'POST', true],
+        'new_name' => ['string', 'POST', false]
+    ]);
     if (!$validation['success']) return $validation;
-    $params = $validation['params'];
+    $params = $validation['data'];
 
     // Get original template
     $original = db_fetch("SELECT * FROM budget_templates WHERE id = :id", ['id' => $params['id']]);
@@ -293,16 +273,16 @@ function handle_add_item(array $user): array {
     if (!$csrfCheck['success']) return $csrfCheck;
 
     $validation = api_validate_params([
-        'template_id' => 'required|int',
-        'description' => 'required',
-        'quantity' => 'optional|float',
-        'unit' => 'optional',
-        'price_per_unit' => 'optional|float',
-        'timeline' => 'optional',
-        'notes' => 'optional'
-    ], $_POST);
+        'template_id' => ['int', 'POST', true],
+        'description' => ['string', 'POST', true],
+        'quantity' => ['float', 'POST', false, 1],
+        'unit' => ['string', 'POST', false, 'stk'],
+        'price_per_unit' => ['float', 'POST', false, 0],
+        'timeline' => ['string', 'POST', false, ''],
+        'notes' => ['string', 'POST', false, '']
+    ]);
     if (!$validation['success']) return $validation;
-    $params = $validation['params'];
+    $params = $validation['data'];
 
     return api_transaction(function() use ($params) {
         // Get next display order
@@ -315,11 +295,11 @@ function handle_add_item(array $user): array {
         $itemData = [
             'template_id' => $params['template_id'],
             'description' => $params['description'],
-            'quantity' => $params['quantity'] ?? 1,
-            'unit' => $params['unit'] ?? 'stk',
-            'price_per_unit' => $params['price_per_unit'] ?? 0,
-            'timeline' => $params['timeline'] ?? '',
-            'notes' => $params['notes'] ?? '',
+            'quantity' => $params['quantity'],
+            'unit' => $params['unit'],
+            'price_per_unit' => $params['price_per_unit'],
+            'timeline' => $params['timeline'],
+            'notes' => $params['notes'],
             'display_order' => $maxOrder + 1
         ];
 
@@ -350,9 +330,18 @@ function handle_update_item(array $user): array {
     $csrfCheck = api_require_csrf();
     if (!$csrfCheck['success']) return $csrfCheck;
 
-    $validation = api_validate_params(['id' => 'required|int'], $_POST);
+    $validation = api_validate_params([
+        'id' => ['int', 'POST', true],
+        'description' => ['string', 'POST', false],
+        'quantity' => ['float', 'POST', false],
+        'unit' => ['string', 'POST', false],
+        'price_per_unit' => ['float', 'POST', false],
+        'timeline' => ['string', 'POST', false],
+        'notes' => ['string', 'POST', false]
+    ]);
     if (!$validation['success']) return $validation;
-    $itemId = $validation['params']['id'];
+    $params = $validation['data'];
+    $itemId = $params['id'];
 
     // Get item to get template_id
     $item = db_fetch("SELECT template_id FROM budget_template_items WHERE id = :id", ['id' => $itemId]);
@@ -361,32 +350,9 @@ function handle_update_item(array $user): array {
         return api_error('Element ikke fundet');
     }
 
-    return api_transaction(function() use ($itemId, $item) {
-        $updateData = [];
-
-        if (isset($_POST['description'])) {
-            $updateData['description'] = sanitize_string($_POST['description']);
-        }
-
-        if (isset($_POST['quantity'])) {
-            $updateData['quantity'] = sanitize_float($_POST['quantity']);
-        }
-
-        if (isset($_POST['unit'])) {
-            $updateData['unit'] = sanitize_string($_POST['unit']);
-        }
-
-        if (isset($_POST['price_per_unit'])) {
-            $updateData['price_per_unit'] = sanitize_float($_POST['price_per_unit']);
-        }
-
-        if (isset($_POST['timeline'])) {
-            $updateData['timeline'] = sanitize_string($_POST['timeline']);
-        }
-
-        if (isset($_POST['notes'])) {
-            $updateData['notes'] = sanitize_string($_POST['notes']);
-        }
+    return api_transaction(function() use ($itemId, $item, $params) {
+        $updateData = $params;
+        unset($updateData['id']);
 
         if (!empty($updateData)) {
             db_update('budget_template_items', $updateData, 'id = :id', ['id' => $itemId]);
@@ -416,9 +382,11 @@ function handle_delete_item(array $user): array {
     $csrfCheck = api_require_csrf();
     if (!$csrfCheck['success']) return $csrfCheck;
 
-    $validation = api_validate_params(['id' => 'required|int'], $_POST);
+    $validation = api_validate_params([
+        'id' => ['int', 'POST', true]
+    ]);
     if (!$validation['success']) return $validation;
-    $itemId = $validation['params']['id'];
+    $itemId = $validation['data']['id'];
 
     // Get item to get template_id
     $item = db_fetch("SELECT template_id FROM budget_template_items WHERE id = :id", ['id' => $itemId]);
@@ -455,11 +423,13 @@ function handle_reorder_items(array $user): array {
     if (!$csrfCheck['success']) return $csrfCheck;
 
     $validation = api_validate_params([
-        'template_id' => 'required|int',
-        'item_ids' => 'required'
-    ], $_POST);
+        'template_id' => ['int', 'POST', true]
+    ]);
     if (!$validation['success']) return $validation;
-    $params = $validation['params'];
+    $params = $validation['data'];
+
+    // item_ids is an array from POST
+    $params['item_ids'] = $_POST['item_ids'] ?? [];
 
     if (!is_array($params['item_ids'])) {
         return api_error('Element ID liste er påkrævet');
@@ -500,11 +470,11 @@ function handle_apply_template(array $user): array {
     if (!$csrfCheck['success']) return $csrfCheck;
 
     $validation = api_validate_params([
-        'template_id' => 'required|int',
-        'element_id' => 'required|int'
-    ], $_POST);
+        'template_id' => ['int', 'POST', true],
+        'element_id' => ['int', 'POST', true]
+    ]);
     if (!$validation['success']) return $validation;
-    $params = $validation['params'];
+    $params = $validation['data'];
 
     // Get template
     $template = db_fetch("SELECT * FROM budget_templates WHERE id = :id", ['id' => $params['template_id']]);
@@ -614,9 +584,11 @@ function handle_get_categories(array $user): array {
  * GET ?module=template&action=get_hierarchy&id=X
  */
 function handle_get_hierarchy(array $user): array {
-    $validation = api_validate_params(['id' => 'required|int'], $_GET);
+    $validation = api_validate_params([
+        'id' => ['int', 'GET', true]
+    ]);
     if (!$validation['success']) return $validation;
-    $templateId = $validation['params']['id'];
+    $templateId = $validation['data']['id'];
 
     $template = db_fetch("
         SELECT * FROM budget_templates WHERE id = :id
@@ -647,13 +619,13 @@ function handle_create_group(array $user): array {
     if (!$csrfCheck['success']) return $csrfCheck;
 
     $validation = api_validate_params([
-        'template_id' => 'required|int',
-        'description' => 'required',
-        'parent_id' => 'optional|int',
-        'quantity' => 'optional|float'
-    ], $_POST);
+        'template_id' => ['int', 'POST', true],
+        'description' => ['string', 'POST', true],
+        'parent_id' => ['int', 'POST', false],
+        'quantity' => ['float', 'POST', false, 1]
+    ]);
     if (!$validation['success']) return $validation;
-    $params = $validation['params'];
+    $params = $validation['data'];
 
     return api_transaction(function() use ($params) {
         $parentId = $params['parent_id'] ?? null;
@@ -706,11 +678,11 @@ function handle_update_multiplier(array $user): array {
     if (!$csrfCheck['success']) return $csrfCheck;
 
     $validation = api_validate_params([
-        'id' => 'required|int',
-        'quantity' => 'required|float'
-    ], $_POST);
+        'id' => ['int', 'POST', true],
+        'quantity' => ['float', 'POST', true]
+    ]);
     if (!$validation['success']) return $validation;
-    $params = $validation['params'];
+    $params = $validation['data'];
 
     // Get item
     $item = db_fetch("
@@ -772,11 +744,11 @@ function handle_move_item(array $user): array {
     if (!$csrfCheck['success']) return $csrfCheck;
 
     $validation = api_validate_params([
-        'id' => 'required|int',
-        'new_parent_id' => 'optional|int'
-    ], $_POST);
+        'id' => ['int', 'POST', true],
+        'new_parent_id' => ['int', 'POST', false]
+    ]);
     if (!$validation['success']) return $validation;
-    $params = $validation['params'];
+    $params = $validation['data'];
 
     // Get item
     $item = db_fetch("SELECT * FROM budget_template_items WHERE id = :id", ['id' => $params['id']]);
