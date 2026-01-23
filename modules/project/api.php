@@ -445,9 +445,40 @@ function handle_get_tree(array $user): array {
 
     $projectTotal = 0;
 
-    // For each building, get hierarchical elements
+    // OPTIMIZED: Fetch ALL elements for ALL buildings in ONE query (prevents N+1)
+    $buildingIds = array_column($buildings, 'id');
+    $allElements = [];
+
+    if (!empty($buildingIds)) {
+        // Build placeholders for IN clause
+        $placeholders = [];
+        $params = [];
+        foreach ($buildingIds as $idx => $bid) {
+            $key = "bid{$idx}";
+            $placeholders[] = ":{$key}";
+            $params[$key] = $bid;
+        }
+
+        // Single query to fetch all elements across all buildings
+        $elements = db_query("
+            SELECT id, building_id, name, parent_id, element_type, location, condition_score,
+                   urgency, time_horizon, capex, replacement_value, unit, quantity,
+                   sort_order
+            FROM building_elements
+            WHERE building_id IN (" . implode(',', $placeholders) . ")
+            ORDER BY building_id, COALESCE(sort_order, 999999), name
+        ", $params);
+
+        // Group elements by building_id for O(1) lookup
+        foreach ($elements as $element) {
+            $allElements[$element['building_id']][] = $element;
+        }
+    }
+
+    // Build hierarchy for each building from pre-fetched elements
     foreach ($buildings as &$building) {
-        $building['elements'] = getElementHierarchy($building['id']);
+        $buildingElements = $allElements[$building['id']] ?? [];
+        $building['elements'] = buildElementHierarchyFromArray($buildingElements);
         $hierarchyTotal = calculateBuildingTotal($building['elements']);
         $building['total_capex'] = $hierarchyTotal;
         $projectTotal += $hierarchyTotal;
@@ -514,7 +545,53 @@ function handle_reorder(array $user): array {
 }
 
 /**
- * Helper: Get hierarchical elements for a building
+ * Helper: Build element hierarchy from pre-fetched array (OPTIMIZED - no N+1)
+ *
+ * This replaces getElementHierarchy() to eliminate N+1 queries
+ * Instead of querying DB recursively, builds hierarchy from memory
+ *
+ * @param array $elements Flat array of elements for a building
+ * @param int|null $parentId Parent ID to filter by (null for root elements)
+ * @return array Hierarchical array of elements with children
+ */
+function buildElementHierarchyFromArray(array $elements, ?int $parentId = null): array {
+    $result = [];
+
+    foreach ($elements as $element) {
+        // Match parent_id (handle both null and actual values)
+        $elementParentId = $element['parent_id'] ?? null;
+
+        if ($parentId === null && $elementParentId === null) {
+            // Root level element
+            $result[] = $element;
+        } elseif ($parentId !== null && $elementParentId == $parentId) {
+            // Child element
+            $result[] = $element;
+        }
+    }
+
+    // Recursively build children for each element (but in memory, not DB)
+    foreach ($result as &$element) {
+        $element['children'] = buildElementHierarchyFromArray($elements, $element['id']);
+
+        // Calculate total CAPEX including children
+        $childrenTotal = 0;
+        foreach ($element['children'] as $child) {
+            $childrenTotal += $child['total_capex'] ?? $child['capex'] ?? 0;
+        }
+        $element['total_capex'] = ($element['capex'] ?? 0) + $childrenTotal;
+    }
+
+    return $result;
+}
+
+/**
+ * Helper: Get hierarchical elements for a building (DEPRECATED - use buildElementHierarchyFromArray)
+ *
+ * WARNING: This function has N+1 query problem. Use buildElementHierarchyFromArray instead.
+ * Kept for backward compatibility only.
+ *
+ * @deprecated Use buildElementHierarchyFromArray() instead
  */
 function getElementHierarchy(int $buildingId, ?int $parentId = null): array {
     $query = "
