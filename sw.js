@@ -2,7 +2,7 @@
  * Service Worker for Offline-First Architecture
  */
 
-const CACHE_NAME = 'duediligence-v2.0';
+const CACHE_NAME = 'duediligence-v2.1';
 const OFFLINE_URL = '/offline.html';
 
 // Assets to cache
@@ -14,11 +14,15 @@ const CACHE_ASSETS = [
     '/assets/js/api.js',
     '/assets/js/router.js',
     '/assets/js/modal.js',
+    '/assets/js/modal-builder.js',
+    '/assets/js/modal-helpers.js',
+    '/assets/js/validation.js',
     '/assets/js/toast.js',
     '/assets/js/searchable-select.js',
     '/assets/js/main.js',
     '/assets/js/app.js',
-    '/assets/js/offline-sync.js'
+    '/assets/js/offline-sync.js',
+    '/js/base-module.js'
 ];
 
 // Install event

@@ -20,15 +20,31 @@ class BaseModule {
      * Åbn create modal med form
      */
     openCreate() {
-        if (!this.getForm) {
-            console.error(`${this.moduleName}: getForm() method not implemented`);
+        if (!this.getFormFields) {
+            console.error(`${this.moduleName}: getFormFields() method not implemented`);
             return;
         }
 
-        Modal.open(this.getForm({}), {
-            size: this.config.modalSize,
-            title: `Opret ${this.config.titleSingular}`
-        });
+        const formId = `${this.moduleName}-form-create`;
+        const formHtml = this._buildFormHtml({}, null, formId);
+
+        ModalBuilder.form(
+            `${this.moduleName}-create`,
+            `Opret ${this.config.titleSingular}`,
+            formHtml,
+            formId,
+            {
+                size: this.config.modalSize,
+                submitText: 'Opret',
+                cancelText: 'Annuller',
+                onSubmit: (e) => this._handleFormSubmit(formId, null),
+                onShow: () => {
+                    // Focus first input
+                    const firstInput = document.querySelector(`#${formId} input, #${formId} textarea, #${formId} select`);
+                    if (firstInput) firstInput.focus();
+                }
+            }
+        );
     }
 
     /**
@@ -45,10 +61,26 @@ class BaseModule {
             App.hideLoading();
 
             if (r.success) {
-                Modal.open(this.getForm(r.data, id), {
-                    size: this.config.modalSize,
-                    title: `Rediger ${this.config.titleSingular}`
-                });
+                const formId = `${this.moduleName}-form-edit-${id}`;
+                const formHtml = this._buildFormHtml(r.data, id, formId);
+
+                ModalBuilder.form(
+                    `${this.moduleName}-edit-${id}`,
+                    `Rediger ${this.config.titleSingular}`,
+                    formHtml,
+                    formId,
+                    {
+                        size: this.config.modalSize,
+                        submitText: 'Gem',
+                        cancelText: 'Annuller',
+                        onSubmit: () => this._handleFormSubmit(formId, id),
+                        onShow: () => {
+                            // Focus first input
+                            const firstInput = document.querySelector(`#${formId} input, #${formId} textarea, #${formId} select`);
+                            if (firstInput) firstInput.focus();
+                        }
+                    }
+                );
             } else {
                 notify(r.error, { type: 'error' });
             }
@@ -60,12 +92,22 @@ class BaseModule {
     }
 
     /**
-     * Submit form (create eller update)
+     * Handle form submission (internal method)
      */
-    async submit(event, id = null) {
-        event.preventDefault();
+    async _handleFormSubmit(formId, id = null) {
+        const form = document.getElementById(formId);
+        if (!form) {
+            console.error('Form not found:', formId);
+            return;
+        }
 
-        const formData = new FormData(event.target);
+        // Validate form
+        if (!form.checkValidity()) {
+            form.reportValidity();
+            return;
+        }
+
+        const formData = new FormData(form);
         formData.append('module', this.moduleName);
         formData.append('action', id ? 'update' : 'create');
         if (id) formData.append('id', id);
@@ -78,13 +120,21 @@ class BaseModule {
                 notify(r.message || 'Gemt', { type: 'success' });
                 Router.reload();
             } else {
-                this.showErrors(r.errors || ['Fejl ved lagring']);
+                this.showErrors(r.errors || ['Fejl ved lagring'], formId);
             }
         } catch (e) {
             notify('Lagringsfejl', { type: 'error' });
             if (window.logError) window.logError(e);
         }
+    }
 
+    /**
+     * Submit form (create eller update) - Legacy support
+     * @deprecated Use ModalBuilder instead
+     */
+    async submit(event, id = null) {
+        event.preventDefault();
+        await this._handleFormSubmit(event.target.id, id);
         return false;
     }
 
@@ -92,14 +142,17 @@ class BaseModule {
      * Bekræft og slet entitet
      */
     async confirmDelete(id, name = '') {
-        const confirmed = await Modal.confirm(
-            `Slet ${this.config.titleSingular.toLowerCase()} "${name}"?`,
-            {
-                title: 'Bekræft sletning',
-                confirmText: 'Slet',
-                confirmClass: 'btn-danger'
-            }
-        );
+        // Use ModalHelpers if available, otherwise fallback
+        const confirmed = typeof ModalHelpers !== 'undefined'
+            ? await ModalHelpers.confirmDelete(name, this.config.titleSingular.toLowerCase())
+            : await Modal.confirm(
+                `Slet ${this.config.titleSingular.toLowerCase()} "${name}"?`,
+                {
+                    title: 'Bekræft sletning',
+                    confirmText: 'Slet',
+                    confirmClass: 'btn-danger'
+                }
+            );
 
         if (!confirmed) return;
 
@@ -126,13 +179,37 @@ class BaseModule {
     /**
      * Vis form errors
      */
-    showErrors(errors) {
-        const errorEl = document.getElementById('formErrors');
-        if (!errorEl) return;
+    showErrors(errors, formId = null) {
+        // Try to find error element in specific form first
+        let errorEl = null;
+        if (formId) {
+            const form = document.getElementById(formId);
+            if (form) {
+                errorEl = form.querySelector('.form-errors');
+            }
+        }
+
+        // Fallback to global error element
+        if (!errorEl) {
+            errorEl = document.getElementById('formErrors');
+        }
+
+        if (!errorEl) {
+            // Create error element if it doesn't exist
+            const form = formId ? document.getElementById(formId) : null;
+            if (form) {
+                errorEl = document.createElement('div');
+                errorEl.className = 'form-errors';
+                form.insertBefore(errorEl, form.firstChild);
+            } else {
+                console.error('Cannot display errors: error element not found');
+                return;
+            }
+        }
 
         errorEl.innerHTML = `
             <div class="alert alert-error">
-                ${errors.map(e => escapeHtml(e)).join('<br>')}
+                ${Array.isArray(errors) ? errors.map(e => escapeHtml(e)).join('<br>') : escapeHtml(errors)}
             </div>
         `;
         errorEl.style.display = 'block';
@@ -175,7 +252,20 @@ class BaseModule {
     }
 
     /**
-     * Standard form template
+     * Build form HTML (internal method)
+     */
+    _buildFormHtml(data, id, formId) {
+        return `
+            <form id="${formId}" class="modal-form">
+                <div class="form-errors" style="display:none;"></div>
+                ${this.getFormFields(data, id)}
+            </form>
+        `;
+    }
+
+    /**
+     * Standard form template - Legacy support
+     * @deprecated Use ModalBuilder instead
      */
     getForm(data, id = null) {
         return `

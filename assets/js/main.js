@@ -5,11 +5,16 @@
 
 // Logout function
 async function logout() {
-    const confirmed = await Modal.confirm('Er du sikker på, at du vil logge ud?', {
-        title: 'Log ud',
-        confirmText: 'Log ud',
-        cancelText: 'Annuller'
-    });
+    const confirmed = await ModalBuilder.confirm(
+        'logout-confirm',
+        'Log ud',
+        'Er du sikker på, at du vil logge ud?',
+        {
+            confirmText: 'Log ud',
+            confirmClass: 'btn-primary',
+            cancelText: 'Annuller'
+        }
+    );
 
     if (confirmed) {
         window.location.href = '/?module=auth&action=logout';
