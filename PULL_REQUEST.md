@@ -66,6 +66,28 @@ Denne PR implementerer omfattende API optimering med konsoliderede helper functi
 - Automatisk cleanup af event listeners
 - Samme API som PHP version for konsistens
 
+**`assets/js/modal-helpers.js`** (450+ linjer): Modal utility helpers
+- `showFormModal()` - Dynamic form builder med field definitions
+- `confirmDelete()` - Standardized delete confirmation med warning icon
+- `showSuccess/Error/Warning/Info()` - Type-specific alerts
+- `showImageViewer()` - Image modal med proper styling
+- `showLoading()` / `hideLoading()` - Loading overlay
+- `showProgress()` - Progress bar for batch operations
+- `showChoice()` - Multi-option selection dialog
+
+**`js/base-module.js`** (Updated): BaseModule ModalBuilder integration
+- `_buildFormHtml()` - Internal form builder
+- `_handleFormSubmit()` - Modern async form submission
+- Backward compatibility bevaret (getForm/submit still work)
+- ModalHelpers integration for confirmDelete
+- Better error handling med form-specific error display
+
+**`sw.js`** (Updated): Service Worker v2.1
+- Cache opdateret med nye modal filer
+- modal-builder.js, modal-helpers.js, validation.js
+- base-module.js added to cache
+- Automatic cache cleanup af old versions
+
 ### ✅ Migrerede Moduler (19 af 21 - 91% færdig)
 
 **Phase 1: Initial Migration (10 moduler)**
@@ -144,6 +166,15 @@ Denne PR implementerer omfattende API optimering med konsoliderede helper functi
 - Accessibility compliance guide
 - Complete real-world eksempler
 - Migration guide fra old pattern
+
+**`docs/MODAL_MIGRATION_STATUS.md`** (500+ linjer): Modal migration tracking
+- Complete migration status overview
+- Before/after code patterns
+- BaseModule integration guide
+- Component-by-component migration plan
+- Testing checklist for migrations
+- Benefits analysis (80% less boilerplate)
+- Timeline og prioritering
 
 **`docs/N+1_QUERY_OPTIMIZATION.md`** (367 linjer): Detaljeret N+1 analyse
 **`docs/JAVASCRIPT_VALIDATION_GUIDE.md`** (378 linjer): Client-side validation
