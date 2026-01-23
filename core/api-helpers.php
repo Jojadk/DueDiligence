@@ -219,6 +219,68 @@ function api_require_csrf(): ?array {
 }
 
 /**
+ * Check rate limit for API requests
+ *
+ * Prevents brute force and DoS attacks by limiting request frequency
+ *
+ * @param string $identifier Unique identifier (user ID or IP address)
+ * @param int $maxRequests Maximum requests allowed in time window
+ * @param int $windowSeconds Time window in seconds
+ * @return bool True if within limit, false if exceeded
+ */
+function api_check_rate_limit(string $identifier, int $maxRequests = 60, int $windowSeconds = 60): bool {
+    // Initialize session storage if needed
+    if (session_status() === PHP_SESSION_NONE) {
+        session_start();
+    }
+
+    if (!isset($_SESSION['rate_limits'])) {
+        $_SESSION['rate_limits'] = [];
+    }
+
+    $key = "rate_limit:" . md5($identifier);
+    $now = time();
+
+    // Clean old entries (older than window)
+    if (isset($_SESSION['rate_limits'][$key])) {
+        $_SESSION['rate_limits'][$key] = array_filter(
+            $_SESSION['rate_limits'][$key],
+            fn($timestamp) => $timestamp > ($now - $windowSeconds)
+        );
+    } else {
+        $_SESSION['rate_limits'][$key] = [];
+    }
+
+    // Count requests in current window
+    $count = count($_SESSION['rate_limits'][$key]);
+
+    if ($count >= $maxRequests) {
+        return false; // Rate limit exceeded
+    }
+
+    // Add this request
+    $_SESSION['rate_limits'][$key][] = $now;
+
+    return true;
+}
+
+/**
+ * Require rate limit check and return error if exceeded
+ *
+ * @param string $identifier Unique identifier (user ID or IP address)
+ * @param int $maxRequests Maximum requests per minute (default 60)
+ * @param int $windowSeconds Time window in seconds (default 60)
+ * @return array|null Returns error array if limit exceeded, null if within limit
+ */
+function api_require_rate_limit(string $identifier, int $maxRequests = 60, int $windowSeconds = 60): ?array {
+    if (!api_check_rate_limit($identifier, $maxRequests, $windowSeconds)) {
+        http_response_code(429); // Too Many Requests
+        return api_error('Rate limit overskredet. Prøv igen om ' . $windowSeconds . ' sekunder.');
+    }
+    return null;
+}
+
+/**
  * Standard CRUD: Get single entity
  * Combines entity fetch, existence check, and permission check
  *

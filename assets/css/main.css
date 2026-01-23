@@ -724,6 +724,91 @@ textarea.form-control {
     gap: var(--spacing-2);
 }
 
+/* Sticky Table Headers & Footers
+   Phase 1 Quick Win - Better overview in long tables */
+.data-table thead th {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    background: var(--color-gray-50);
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.data-table tfoot td,
+.data-table tfoot th {
+    position: sticky;
+    bottom: 0;
+    z-index: 10;
+    background: var(--color-gray-50);
+    box-shadow: 0 -2px 4px rgba(0, 0, 0, 0.1);
+    font-weight: 600;
+    border-top: 2px solid var(--color-gray-300);
+}
+
+/* Budget Overview Table - Specific Styling */
+.budget-overview-table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.budget-overview-table thead {
+    background: var(--color-gray-50);
+}
+
+.budget-overview-table thead th {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    background: var(--color-white);
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    padding: var(--spacing-3) var(--spacing-4);
+    text-align: left;
+    font-size: var(--font-size-sm);
+    font-weight: 600;
+    color: var(--color-gray-700);
+    border-bottom: 2px solid var(--color-gray-200);
+}
+
+.budget-overview-table tfoot {
+    position: sticky;
+    bottom: 0;
+    z-index: 10;
+    background: #f7fafc;
+    box-shadow: 0 -2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.budget-overview-table tfoot td {
+    font-weight: 600;
+    padding: var(--spacing-3) var(--spacing-4);
+    border-top: 2px solid var(--color-gray-300);
+}
+
+.budget-overview-table tbody tr:hover {
+    background: var(--color-gray-50);
+    transition: background-color 0.15s ease;
+}
+
+/* Scrollable Table Container with Sticky Headers */
+.table-scroll-container {
+    max-height: 600px;
+    overflow-y: auto;
+    position: relative;
+}
+
+/* Ensure sticky elements work in scrollable containers */
+.table-scroll-container .data-table thead th,
+.table-scroll-container .budget-overview-table thead th {
+    position: sticky;
+    top: 0;
+}
+
+.table-scroll-container .data-table tfoot td,
+.table-scroll-container .data-table tfoot th,
+.table-scroll-container .budget-overview-table tfoot td {
+    position: sticky;
+    bottom: 0;
+}
+
 /* ========================================
    COMPONENTS - BADGES
    ======================================== */

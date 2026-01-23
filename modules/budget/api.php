@@ -344,6 +344,7 @@ function handle_save_lines(array $user): array {
             }
 
             // Update element's CAPEX if budget type is capex
+            $warning = null;
             if ($budgetType === 'capex') {
                 $total = 0;
                 foreach ($lines as $line) {
@@ -352,12 +353,39 @@ function handle_save_lines(array $user): array {
                     $total += $qty * $price;
                 }
 
+                // CAPEX Validation Warning - check for significant deviation
+                $currentCapex = (float)($element['capex'] ?? 0);
+                if ($currentCapex > 0) {
+                    $difference = abs($total - $currentCapex);
+                    $threshold = $currentCapex * 0.10; // 10% threshold
+
+                    if ($difference > $threshold) {
+                        $variancePct = round(($difference / $currentCapex) * 100, 1);
+                        $warning = "CAPEX afviger med {$variancePct}% fra forventet værdi (forventet: " .
+                                   number_format($currentCapex, 0, ',', '.') . " kr, beregnet: " .
+                                   number_format($total, 0, ',', '.') . " kr)";
+
+                        // Log variance for audit trail
+                        log_activity('capex_variance_detected', 'building_element', $elementId, [
+                            'expected' => $currentCapex,
+                            'calculated' => $total,
+                            'variance_pct' => $variancePct,
+                            'budget_type' => $budgetType
+                        ]);
+                    }
+                }
+
                 db_update('building_elements', ['capex' => $total], 'id = :id', ['id' => $elementId]);
             }
 
             log_activity('budget_lines_saved', 'building_element', $elementId);
 
-            return ['lines_saved' => count($lines)];
+            $result = ['lines_saved' => count($lines)];
+            if ($warning) {
+                $result['warning'] = $warning;
+            }
+
+            return $result;
         },
         'Budget linjer gemt',
         'Kunne ikke gemme budget'
