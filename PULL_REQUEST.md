@@ -82,8 +82,19 @@ Denne PR implementerer omfattende API optimering med konsoliderede helper functi
 - ModalHelpers integration for confirmDelete
 - Better error handling med form-specific error display
 
-**`sw.js`** (Updated): Service Worker v2.1
-- Cache opdateret med nye modal filer
+**`assets/js/components/table-manager.js`** (394 linjer): Centraliseret tabel håndtering
+- Column sorting (ascending/descending) med visual indicators
+- Search/filter functionality med debounce
+- Client-side og server-side pagination support
+- Responsive design support
+- Automatic DOM manipulation (filter input, pagination controls)
+- Event delegation patterns for performance
+- Configurable callbacks: `onSort`, `onFilter`, `onPageChange`
+- Public methods: `refresh()`, `setFilter()`, `clearFilter()`, `destroy()`
+- Data attribute support for custom sort values
+
+**`sw.js`** (Updated): Service Worker v2.2
+- Cache opdateret med table-manager.js component
 - modal-builder.js, modal-helpers.js, validation.js
 - base-module.js added to cache
 - Automatic cache cleanup af old versions

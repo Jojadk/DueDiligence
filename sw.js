@@ -2,7 +2,7 @@
  * Service Worker for Offline-First Architecture
  */
 
-const CACHE_NAME = 'duediligence-v2.1';
+const CACHE_NAME = 'duediligence-v2.2';
 const OFFLINE_URL = '/offline.html';
 
 // Assets to cache
@@ -22,6 +22,7 @@ const CACHE_ASSETS = [
     '/assets/js/main.js',
     '/assets/js/app.js',
     '/assets/js/offline-sync.js',
+    '/assets/js/components/table-manager.js',
     '/js/base-module.js'
 ];
 
