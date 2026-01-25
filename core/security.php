@@ -474,8 +474,44 @@ function set_security_headers(): void {
     // Referrer Policy
     header('Referrer-Policy: strict-origin-when-cross-origin');
 
-    // Content Security Policy
-    header("Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:;");
+    // HTTP Strict Transport Security (HSTS) - only enable if using HTTPS
+    if (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') {
+        header('Strict-Transport-Security: max-age=31536000; includeSubDomains; preload');
+    }
+
+    // Permissions Policy (formerly Feature Policy)
+    header("Permissions-Policy: geolocation=(), microphone=(), camera=()");
+
+    // Content Security Policy (Enhanced)
+    $csp = [
+        "default-src 'self'",
+        "script-src 'self' 'unsafe-inline'", // TODO: Remove unsafe-inline and use nonces
+        "style-src 'self' 'unsafe-inline'", // TODO: Remove unsafe-inline and use nonces
+        "img-src 'self' data: blob:",
+        "font-src 'self' data:",
+        "connect-src 'self'",
+        "media-src 'self'",
+        "object-src 'none'",
+        "frame-src 'self'",
+        "base-uri 'self'",
+        "form-action 'self'",
+        "frame-ancestors 'self'",
+        "upgrade-insecure-requests"
+    ];
+
+    header("Content-Security-Policy: " . implode('; ', $csp));
+
+    // Report-To header for CSP violations (optional)
+    // Uncomment and configure endpoint if you want CSP violation reports
+    /*
+    header("Report-To: " . json_encode([
+        'group' => 'csp-endpoint',
+        'max_age' => 10886400,
+        'endpoints' => [
+            ['url' => '/api.php?action=csp_report']
+        ]
+    ]));
+    */
 }
 
 // ============================================================================

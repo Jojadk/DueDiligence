@@ -13,6 +13,7 @@
 
 require_once __DIR__ . '/core/core.php';
 require_once __DIR__ . '/core/security.php';
+require_once __DIR__ . '/core/rate-limiter.php';
 
 header('Content-Type: application/json');
 set_security_headers();
@@ -32,6 +33,10 @@ if (!$action) {
     echo json_encode(['success' => false, 'error' => 'No action specified']);
     exit;
 }
+
+// Apply rate limiting
+$module = $_GET['module'] ?? 'api';
+RateLimiter::middleware($module, $action);
 
 // Route to appropriate handler
 try {

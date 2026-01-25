@@ -7,6 +7,12 @@
     <meta name="description" content="DueDiligence - Bygningsgennemgang og tilstandsrapporter">
     <link rel="stylesheet" href="/assets/css/main.css">
     <link rel="stylesheet" href="/assets/css/components.css">
+    <link rel="stylesheet" href="/css/user-guide.css">
+    <link rel="stylesheet" href="/css/loading-states.css">
+    <link rel="stylesheet" href="/css/dark-mode.css">
+
+    <!-- Theme Manager (load early to prevent flash) -->
+    <script src="/assets/js/theme-manager.js"></script>
 </head>
 <body>
     <!-- Top Header -->
@@ -37,6 +43,10 @@
         </div>
 
         <div class="header-right">
+            <button type="button" class="btn-icon" id="helpBtn" aria-label="Hjælp" data-tooltip="Hjælp og vejledning">
+                <?= icon('help-circle', 22) ?>
+            </button>
+
             <button type="button" class="btn-icon" id="notificationBtn" aria-label="Notifikationer">
                 <?= icon('bell', 22) ?>
                 <span class="notification-badge" id="notificationCount" style="display: none;">0</span>
@@ -72,23 +82,23 @@
         <nav class="sidebar-nav">
             <div class="nav-section">
                 <div class="nav-section-title">Hovedmenu</div>
-                <a href="#" onclick="navigate('dashboard'); return false;" class="nav-item" data-route="dashboard">
+                <a href="#" onclick="navigate('dashboard'); return false;" class="nav-item" data-route="dashboard" data-tooltip="Gå til dashboard">
                     <?= icon('home', 20) ?>
                     <span>Dashboard</span>
                 </a>
-                <a href="#" onclick="navigate('customer'); return false;" class="nav-item" data-route="customer">
+                <a href="#" onclick="navigate('customer'); return false;" class="nav-item" data-route="customer" data-tooltip="Administrer kunder" data-help-trigger="customers">
                     <?= icon('users', 20) ?>
                     <span>Kunder</span>
                 </a>
-                <a href="#" onclick="navigate('project'); return false;" class="nav-item" data-route="project">
+                <a href="#" onclick="navigate('project'); return false;" class="nav-item" data-route="project" data-tooltip="Administrer projekter" data-help-trigger="projects">
                     <?= icon('folder', 20) ?>
                     <span>Projekter</span>
                 </a>
-                <a href="#" onclick="navigate('building'); return false;" class="nav-item" data-route="building">
+                <a href="#" onclick="navigate('building'); return false;" class="nav-item" data-route="building" data-tooltip="Administrer bygninger" data-help-trigger="buildings">
                     <?= icon('building', 20) ?>
                     <span>Bygninger</span>
                 </a>
-                <a href="#" onclick="navigate('building_element'); return false;" class="nav-item" data-route="building_element">
+                <a href="#" onclick="navigate('building_element'); return false;" class="nav-item" data-route="building_element" data-tooltip="Administrer bygningsdele">
                     <?= icon('list', 20) ?>
                     <span>Bygningsdele</span>
                 </a>
@@ -96,7 +106,7 @@
 
             <div class="nav-section">
                 <div class="nav-section-title">Data</div>
-                <a href="#" onclick="navigate('price_catalog'); return false;" class="nav-item" data-route="price_catalog">
+                <a href="#" onclick="navigate('price_catalog'); return false;" class="nav-item" data-route="price_catalog" data-tooltip="Administrer priskatalog" data-help-trigger="budget">
                     <?= icon('database', 20) ?>
                     <span>Priskatalog</span>
                 </a>
@@ -104,11 +114,11 @@
 
             <div class="nav-section">
                 <div class="nav-section-title">Rapporter</div>
-                <a href="#" onclick="navigate('reports'); return false;" class="nav-item" data-route="reports">
+                <a href="#" onclick="navigate('reports'); return false;" class="nav-item" data-route="reports" data-tooltip="Generer og administrer rapporter" data-help-trigger="reports">
                     <?= icon('file-text', 20) ?>
                     <span>Rapporter</span>
                 </a>
-                <a href="#" onclick="navigate('reports/export'); return false;" class="nav-item" data-route="reports/export">
+                <a href="#" onclick="navigate('reports/export'); return false;" class="nav-item" data-route="reports/export" data-tooltip="Eksporter data og rapporter">
                     <?= icon('download', 20) ?>
                     <span>Eksporter</span>
                 </a>
@@ -216,6 +226,7 @@
 
     <!-- Core JavaScript -->
     <script src="/js/error-logger.js"></script>
+    <script src="/assets/js/error-display.js"></script>
     <script src="/assets/js/utils.js"></script>
     <script src="/assets/js/api.js"></script>
     <script src="/assets/js/router.js"></script>
@@ -227,6 +238,8 @@
     <script src="/assets/js/component-loader.js"></script>
     <script src="/assets/js/offline-sync.js"></script>
     <script src="/js/collaboration.js"></script>
+    <script src="/assets/js/keyboard-shortcuts.js"></script>
+    <script src="/assets/js/user-guide.js"></script>
     <script src="/assets/js/main.js"></script>
     <script src="/assets/js/app.js"></script>
 
