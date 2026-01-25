@@ -12,7 +12,8 @@ const ComponentLoader = {
         'image-upload': '/assets/js/components/image-upload.js',
         'project-snapshot': '/assets/js/components/project-snapshot.js',
         'report-tree': '/assets/js/components/report-tree.js',
-        'budget-modal': '/assets/js/components/budget-modal.js'
+        'budget-modal': '/assets/js/components/budget-modal.js',
+        'table-manager': '/assets/js/components/table-manager.js'
     },
 
     /**

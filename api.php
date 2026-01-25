@@ -327,7 +327,7 @@ function getDashboardWidgets(array $user): array {
         $widgets['recent_users'] = db_query("SELECT id, name, email, created_at FROM users ORDER BY created_at DESC LIMIT 5");
         $widgets['system_health'] = [
             'database_size' => db_value("SELECT pg_database_size(current_database())"),
-            'total_records' => db_value("SELECT COUNT(*) FROM customers") + db_value("SELECT COUNT(*) FROM projects"),
+            'total_records' => db_value("SELECT (SELECT COUNT(*) FROM customers) + (SELECT COUNT(*) FROM projects)"),
             'uptime' => sys_getloadavg()
         ];
     }
@@ -536,11 +536,20 @@ function updateOrder(array $user): array {
         }
     }
 
-    // Update sort orders
+    // Update sort orders - optimized batch update using CASE statement
     db_begin_transaction();
     try {
-        foreach ($items as $index => $itemId) {
-            db_update('building_elements', ['sort_order' => $index], 'id = :id', ['id' => sanitize_int($itemId)]);
+        if (!empty($items)) {
+            $cases = [];
+            $ids = [];
+            foreach ($items as $index => $itemId) {
+                $itemId = sanitize_int($itemId);
+                $cases[] = "WHEN id = $itemId THEN $index";
+                $ids[] = $itemId;
+            }
+            $caseSql = implode(' ', $cases);
+            $idsList = implode(',', $ids);
+            db_query("UPDATE building_elements SET sort_order = CASE $caseSql END WHERE id IN ($idsList)");
         }
         db_commit();
         log_activity('elements_reordered', 'building', $buildingId);
@@ -583,15 +592,22 @@ function updateImageOrder(array $user): array {
         }
     }
 
-    // Update sort orders in transaction
+    // Update sort orders in transaction - optimized batch update
     db_begin_transaction();
     try {
-        foreach ($imageIds as $index => $imageId) {
-            db_update('images', ['sort_order' => $index], 'id = :id AND entity_type = :type AND entity_id = :eid', [
-                'id' => sanitize_int($imageId),
-                'type' => $entityType,
-                'eid' => $entityId
-            ]);
+        if (!empty($imageIds)) {
+            $cases = [];
+            $ids = [];
+            foreach ($imageIds as $index => $imageId) {
+                $imageId = sanitize_int($imageId);
+                $cases[] = "WHEN id = $imageId THEN $index";
+                $ids[] = $imageId;
+            }
+            $caseSql = implode(' ', $cases);
+            $idsList = implode(',', $ids);
+            $entityIdSafe = sanitize_int($entityId);
+            $entityTypeSafe = db_escape($entityType);
+            db_query("UPDATE images SET sort_order = CASE $caseSql END WHERE id IN ($idsList) AND entity_type = '$entityTypeSafe' AND entity_id = $entityIdSafe");
         }
         db_commit();
         log_activity('images_reordered', $entityType, $entityId);
