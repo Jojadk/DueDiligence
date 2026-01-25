@@ -67,7 +67,7 @@ function handle_get_list(array $user): array {
 
     // Search filter
     if ($search) {
-        $where[] = "(p.name ILIKE :search OR p.description ILIKE :search)";
+        $where[] = "(" . db_ilike('p.name', ':search') . " OR " . db_ilike('p.description', ':search') . ")";
         $params['search'] = "%{$search}%";
     }
 

@@ -17,7 +17,7 @@ if ($action === 'search_customers') {
     $customers = db_query("
         SELECT id, name, cvr_number
         FROM customers
-        WHERE name ILIKE :search OR cvr_number ILIKE :search
+        WHERE " . db_ilike('name', ':search') . " OR " . db_ilike('cvr_number', ':search') . "
         ORDER BY name ASC
         LIMIT :limit
     ", [
@@ -186,7 +186,7 @@ $whereClauses = [];
 $params = [];
 
 if ($searchTerm) {
-    $whereClauses[] = "(p.name ILIKE :search OR p.address ILIKE :search OR p.city ILIKE :search OR c.name ILIKE :search)";
+    $whereClauses[] = "(" . db_ilike('p.name', ':search') . " OR " . db_ilike('p.address', ':search') . " OR " . db_ilike('p.city', ':search') . " OR " . db_ilike('c.name', ':search') . ")";
     $params['search'] = '%' . $searchTerm . '%';
 }
 

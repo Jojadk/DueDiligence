@@ -310,9 +310,9 @@ function handle_search_items(array $user): array {
         FROM price_catalog_items pci
         LEFT JOIN price_categories pc ON pc.id = pci.category_id
         WHERE (
-            pci.item_code ILIKE :search
-            OR pci.name ILIKE :search
-            OR pci.description ILIKE :search
+            " . db_ilike('pci.item_code', ':search') . "
+            OR " . db_ilike('pci.name', ':search') . "
+            OR " . db_ilike('pci.description', ':search') . "
         )
     ";
 
@@ -329,8 +329,8 @@ function handle_search_items(array $user): array {
 
     $query .= " ORDER BY
                     CASE
-                        WHEN pci.item_code ILIKE :exact THEN 1
-                        WHEN pci.name ILIKE :exact THEN 2
+                        WHEN " . db_ilike('pci.item_code', ':exact') . " THEN 1
+                        WHEN " . db_ilike('pci.name', ':exact') . " THEN 2
                         ELSE 3
                     END,
                     pci.item_code ASC

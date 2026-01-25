@@ -184,7 +184,7 @@ $whereClauses = [];
 $params = [];
 
 if ($searchTerm) {
-    $whereClauses[] = "(name ILIKE :search OR cvr_number ILIKE :search OR contact_person ILIKE :search OR email ILIKE :search)";
+    $whereClauses[] = "(" . db_ilike('name', ':search') . " OR " . db_ilike('cvr_number', ':search') . " OR " . db_ilike('contact_person', ':search') . " OR " . db_ilike('email', ':search') . ")";
     $params['search'] = '%' . $searchTerm . '%';
 }
 

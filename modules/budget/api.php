@@ -40,9 +40,17 @@ function handle_search_catalog(array $user): array {
 
     if (!empty($query)) {
         // Search in name, description, or tags
-        $where[] = "(name ILIKE :query OR description ILIKE :query OR :query_tag = ANY(tags))";
-        $params['query'] = '%' . $query . '%';
-        $params['query_tag'] = $query;
+        // Note: tags array search works differently in MySQL (JSON) vs PostgreSQL (TEXT[])
+        if (DatabaseAbstraction::isPostgreSQL()) {
+            $where[] = "(" . db_ilike('name', ':query') . " OR " . db_ilike('description', ':query') . " OR :query_tag = ANY(tags))";
+            $params['query'] = '%' . $query . '%';
+            $params['query_tag'] = $query;
+        } else {
+            // MySQL uses JSON for tags
+            $where[] = "(" . db_ilike('name', ':query') . " OR " . db_ilike('description', ':query') . " OR JSON_CONTAINS(tags, JSON_QUOTE(:query_tag)))";
+            $params['query'] = '%' . $query . '%';
+            $params['query_tag'] = $query;
+        }
     }
 
     if (!empty($category)) {

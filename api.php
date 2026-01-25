@@ -978,14 +978,14 @@ function globalSearch(array $user): array {
 
     // Search customers (if has permission)
     if (has_permission($user, 'view_customers')) {
-        $customers = db_query("SELECT id, name, 'customer' as type FROM customers WHERE name ILIKE :q LIMIT 5", ['q' => $search]);
+        $customers = db_query("SELECT id, name, 'customer' as type FROM customers WHERE " . db_ilike('name', ':q') . " LIMIT 5", ['q' => $search]);
         $results = array_merge($results, $customers);
     }
 
     // Search projects (only owned if not admin)
     $projectWhere = has_permission($user, 'admin') ? '' : 'AND user_id = :uid';
     $projectParams = has_permission($user, 'admin') ? ['q' => $search] : ['q' => $search, 'uid' => $user['id']];
-    $projects = db_query("SELECT id, name, 'project' as type FROM projects WHERE name ILIKE :q $projectWhere LIMIT 5", $projectParams);
+    $projects = db_query("SELECT id, name, 'project' as type FROM projects WHERE " . db_ilike('name', ':q') . " $projectWhere LIMIT 5", $projectParams);
     $results = array_merge($results, $projects);
 
     // Format results
@@ -1841,9 +1841,17 @@ function searchPriceCatalog(array $user): array {
 
     if (!empty($query)) {
         // Search in name, description, or tags
-        $where[] = "(name ILIKE :query OR description ILIKE :query OR :query_tag = ANY(tags))";
-        $params['query'] = '%' . $query . '%';
-        $params['query_tag'] = $query;
+        // Note: tags array search works differently in MySQL (JSON) vs PostgreSQL (TEXT[])
+        if (DatabaseAbstraction::isPostgreSQL()) {
+            $where[] = "(" . db_ilike('name', ':query') . " OR " . db_ilike('description', ':query') . " OR :query_tag = ANY(tags))";
+            $params['query'] = '%' . $query . '%';
+            $params['query_tag'] = $query;
+        } else {
+            // MySQL uses JSON for tags
+            $where[] = "(" . db_ilike('name', ':query') . " OR " . db_ilike('description', ':query') . " OR JSON_CONTAINS(tags, JSON_QUOTE(:query_tag)))";
+            $params['query'] = '%' . $query . '%';
+            $params['query_tag'] = $query;
+        }
     }
 
     if (!empty($category)) {

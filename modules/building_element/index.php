@@ -8,7 +8,7 @@ $buildingId = $_GET['building_id'] ?? null;
 // AJAX searches
 if ($action === 'search_buildings') {
     $q = $_GET['q'] ?? '';
-    $results = db_query("SELECT b.id, b.name, p.name as project_name FROM buildings b LEFT JOIN projects p ON b.project_id = p.id WHERE b.name ILIKE :q ORDER BY b.name LIMIT 20", ['q' => '%'.$q.'%']);
+    $results = db_query("SELECT b.id, b.name, p.name as project_name FROM buildings b LEFT JOIN projects p ON b.project_id = p.id WHERE " . db_ilike('b.name', ':q') . " ORDER BY b.name LIMIT 20", ['q' => '%'.$q.'%']);
     header('Content-Type: application/json');
     echo json_encode(['success' => true, 'data' => array_map(fn($r) => ['id' => $r['id'], 'label' => $r['name'] . ' (' . $r['project_name'] . ')'], $results)]);
     exit;
@@ -24,7 +24,7 @@ if ($action === 'search_parents') {
 
 if ($action === 'search_price_catalog') {
     $q = $_GET['q'] ?? '';
-    $results = db_query("SELECT id, name, category, unit_price, unit FROM price_catalogs WHERE (name ILIKE :q OR category ILIKE :q) AND active = true ORDER BY category, name LIMIT 20", ['q' => '%'.$q.'%']);
+    $results = db_query("SELECT id, name, category, unit_price, unit FROM price_catalogs WHERE (" . db_ilike('name', ':q') . " OR " . db_ilike('category', ':q') . ") AND active = true ORDER BY category, name LIMIT 20", ['q' => '%'.$q.'%']);
     header('Content-Type: application/json');
     echo json_encode(['success' => true, 'data' => array_map(fn($r) => ['id' => $r['id'], 'label' => $r['name'] . ' - ' . $r['category'] . ' (' . number_format($r['unit_price'], 2, ',', '.') . ' kr/' . $r['unit'] . ')'], $results)]);
     exit;
@@ -144,7 +144,7 @@ $whereClauses = [];
 $params = [];
 
 if ($searchTerm) {
-    $whereClauses[] = "(be.name ILIKE :search OR be.location ILIKE :search OR b.name ILIKE :search)";
+    $whereClauses[] = "(" . db_ilike('be.name', ':search') . " OR " . db_ilike('be.location', ':search') . " OR " . db_ilike('b.name', ':search') . ")";
     $params['search'] = '%' . $searchTerm . '%';
 }
 

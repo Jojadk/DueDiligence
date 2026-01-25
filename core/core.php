@@ -20,12 +20,14 @@ define('UPLOADS_DIR', ROOT_DIR . '/uploads');
 define('LOGS_DIR', ROOT_DIR . '/logs');
 define('REPORTS_DIR', ROOT_DIR . '/reports');
 
-// Database constants (loaded from config)
-define('DB_TYPE', 'pgsql');
+// Database constants (loaded from environment or config)
+// Supported DB_TYPE values: 'mysql', 'pgsql'
+// Default is MySQL for maximum compatibility
+define('DB_TYPE', getenv('DB_TYPE') ?: 'mysql');
 define('DB_HOST', getenv('DB_HOST') ?: 'localhost');
-define('DB_PORT', getenv('DB_PORT') ?: '5432');
+define('DB_PORT', getenv('DB_PORT') ?: (DB_TYPE === 'pgsql' ? '5432' : '3306'));
 define('DB_NAME', getenv('DB_NAME') ?: 'duediligence');
-define('DB_USER', getenv('DB_USER') ?: 'postgres');
+define('DB_USER', getenv('DB_USER') ?: (DB_TYPE === 'pgsql' ? 'postgres' : 'root'));
 define('DB_PASS', getenv('DB_PASS') ?: '');
 
 // Security constants
@@ -40,6 +42,13 @@ define('ALLOWED_EXTENSIONS', ['jpg', 'jpeg', 'png', 'pdf', 'doc', 'docx', 'xls',
 define('ALLOWED_IMAGE_TYPES', ['jpg', 'jpeg', 'png']);
 
 // ============================================================================
+// DATABASE ABSTRACTION LAYER
+// ============================================================================
+
+// Load database abstraction for MySQL/PostgreSQL compatibility
+require_once __DIR__ . '/database-abstraction.php';
+
+// ============================================================================
 // DATABASE CONNECTION
 // ============================================================================
 
@@ -52,11 +61,20 @@ function db(): PDO {
     if ($pdo === null) {
         try {
             $dsn = DB_TYPE . ':host=' . DB_HOST . ';port=' . DB_PORT . ';dbname=' . DB_NAME;
-            $pdo = new PDO($dsn, DB_USER, DB_PASS, [
+
+            $options = [
                 PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
                 PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
                 PDO::ATTR_EMULATE_PREPARES => false,
-            ]);
+            ];
+
+            // MySQL-specific options
+            if (DB_TYPE === 'mysql') {
+                $options[PDO::MYSQL_ATTR_INIT_COMMAND] = "SET NAMES utf8mb4 COLLATE utf8mb4_unicode_ci";
+                $dsn .= ';charset=utf8mb4';
+            }
+
+            $pdo = new PDO($dsn, DB_USER, DB_PASS, $options);
         } catch (PDOException $e) {
             log_error('Database connection failed: ' . $e->getMessage());
             die('Database connection failed');

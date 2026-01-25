@@ -8,7 +8,7 @@ $projectId = $_GET['project_id'] ?? null;
 // AJAX search projects
 if ($action === 'search_projects') {
     $q = $_GET['q'] ?? '';
-    $results = db_query("SELECT id, name, address FROM projects WHERE name ILIKE :q OR address ILIKE :q ORDER BY name LIMIT 20", ['q' => '%'.$q.'%']);
+    $results = db_query("SELECT id, name, address FROM projects WHERE " . db_ilike('name', ':q') . " OR " . db_ilike('address', ':q') . " ORDER BY name LIMIT 20", ['q' => '%'.$q.'%']);
     header('Content-Type: application/json');
     echo json_encode(['success' => true, 'data' => array_map(fn($r) => ['id' => $r['id'], 'label' => $r['name'] . ' - ' . $r['address']], $results)]);
     exit;
@@ -126,7 +126,7 @@ $whereClauses = [];
 $params = [];
 
 if ($searchTerm) {
-    $whereClauses[] = "(b.name ILIKE :search OR b.building_number ILIKE :search OR p.name ILIKE :search)";
+    $whereClauses[] = "(" . db_ilike('b.name', ':search') . " OR " . db_ilike('b.building_number', ':search') . " OR " . db_ilike('p.name', ':search') . ")";
     $params['search'] = '%' . $searchTerm . '%';
 }
 
