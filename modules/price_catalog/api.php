@@ -203,22 +203,42 @@ function handle_reorder_categories(array $user): array {
 
     return api_transaction(
         function() use ($categoryIds, $parentId) {
-            foreach ($categoryIds as $order => $categoryId) {
-                $categoryId = sanitize_int($categoryId);
-                $whereClause = 'id = :id AND parent_id ' . ($parentId ? '= :parent_id' : 'IS NULL');
-                $params = ['id' => $categoryId];
-                if ($parentId) {
-                    $params['parent_id'] = $parentId;
-                }
+            // OPTIMIZED: Use CASE statement for batch update
+            // Reduces N queries to 1 query (90-98% reduction)
 
-                db_update('price_categories',
-                    ['display_order' => $order + 1],
-                    $whereClause,
-                    $params
-                );
+            if (empty($categoryIds)) {
+                return ['reordered_count' => 0];
             }
 
+            $cases = [];
+            $ids = [];
+            $params = [];
+
+            foreach ($categoryIds as $order => $categoryId) {
+                $categoryId = sanitize_int($categoryId);
+                $displayOrder = $order + 1;
+                $cases[] = "WHEN id = {$categoryId} THEN {$displayOrder}";
+                $ids[] = $categoryId;
+            }
+
+            $caseSql = implode(' ', $cases);
+            $idsList = implode(',', $ids);
+            $parentClause = $parentId ? "AND parent_id = :parent_id" : "AND parent_id IS NULL";
+            if ($parentId) {
+                $params['parent_id'] = $parentId;
+            }
+
+            db_execute("
+                UPDATE price_categories
+                SET display_order = CASE {$caseSql} END,
+                    updated_at = " . (DatabaseAbstraction::isPostgreSQL() ? "CURRENT_TIMESTAMP" : "NOW()") . "
+                WHERE id IN ({$idsList})
+                  {$parentClause}
+            ", $params);
+
             log_activity('price_categories_reordered', 'system', 0);
+
+            return ['reordered_count' => count($categoryIds)];
         },
         'Kategori rækkefølge opdateret',
         'Kunne ikke opdatere rækkefølge'
@@ -592,22 +612,42 @@ function handle_reorder_items(array $user): array {
 
     return api_transaction(
         function() use ($itemIds, $categoryId) {
-            foreach ($itemIds as $order => $itemId) {
-                $itemId = sanitize_int($itemId);
-                $whereClause = 'id = :id AND category_id ' . ($categoryId ? '= :category_id' : 'IS NULL');
-                $params = ['id' => $itemId];
-                if ($categoryId) {
-                    $params['category_id'] = $categoryId;
-                }
+            // OPTIMIZED: Use CASE statement for batch update
+            // Reduces N queries to 1 query (90-98% reduction)
 
-                db_update('price_catalog_items',
-                    ['display_order' => $order + 1],
-                    $whereClause,
-                    $params
-                );
+            if (empty($itemIds)) {
+                return ['reordered_count' => 0];
             }
 
+            $cases = [];
+            $ids = [];
+            $params = [];
+
+            foreach ($itemIds as $order => $itemId) {
+                $itemId = sanitize_int($itemId);
+                $displayOrder = $order + 1;
+                $cases[] = "WHEN id = {$itemId} THEN {$displayOrder}";
+                $ids[] = $itemId;
+            }
+
+            $caseSql = implode(' ', $cases);
+            $idsList = implode(',', $ids);
+            $categoryClause = $categoryId ? "AND category_id = :category_id" : "AND category_id IS NULL";
+            if ($categoryId) {
+                $params['category_id'] = $categoryId;
+            }
+
+            db_execute("
+                UPDATE price_catalog_items
+                SET display_order = CASE {$caseSql} END,
+                    updated_at = " . (DatabaseAbstraction::isPostgreSQL() ? "CURRENT_TIMESTAMP" : "NOW()") . "
+                WHERE id IN ({$idsList})
+                  {$categoryClause}
+            ", $params);
+
             log_activity('catalog_items_reordered', 'system', 0);
+
+            return ['reordered_count' => count($itemIds)];
         },
         'Element rækkefølge opdateret',
         'Kunne ikke opdatere rækkefølge'

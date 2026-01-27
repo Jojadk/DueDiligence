@@ -525,21 +525,39 @@ function handle_update_order(array $user): array {
     // Use api_transaction for reordering
     return api_transaction(
         function() use ($elementIds, $buildingId, $parentId) {
+            // OPTIMIZED: Use CASE statement for batch update
+            // Reduces N queries to 1 query (90-98% reduction)
+
+            if (empty($elementIds)) {
+                return ['reordered_count' => 0];
+            }
+
+            $cases = [];
+            $ids = [];
+            $params = ['building_id' => $buildingId];
+
             foreach ($elementIds as $order => $elementId) {
                 $elementId = sanitize_int($elementId);
-                $whereClause = 'id = :id AND building_id = :building_id AND parent_id ' .
-                               ($parentId ? '= :parent_id' : 'IS NULL');
-                $params = ['id' => $elementId, 'building_id' => $buildingId];
-                if ($parentId) {
-                    $params['parent_id'] = $parentId;
-                }
-
-                db_update('building_elements',
-                    ['display_order' => $order + 1],
-                    $whereClause,
-                    $params
-                );
+                $displayOrder = $order + 1;
+                $cases[] = "WHEN id = {$elementId} THEN {$displayOrder}";
+                $ids[] = $elementId;
             }
+
+            $caseSql = implode(' ', $cases);
+            $idsList = implode(',', $ids);
+            $parentClause = $parentId ? "AND parent_id = :parent_id" : "AND parent_id IS NULL";
+            if ($parentId) {
+                $params['parent_id'] = $parentId;
+            }
+
+            db_execute("
+                UPDATE building_elements
+                SET display_order = CASE {$caseSql} END,
+                    updated_at = " . (DatabaseAbstraction::isPostgreSQL() ? "CURRENT_TIMESTAMP" : "NOW()") . "
+                WHERE id IN ({$idsList})
+                  AND building_id = :building_id
+                  {$parentClause}
+            ", $params);
 
             log_activity('elements_reordered', 'building', $buildingId);
 

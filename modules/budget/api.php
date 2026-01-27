@@ -320,35 +320,117 @@ function handle_save_lines(array $user): array {
     // Use transaction for batch save
     return api_transaction(
         function() use ($elementId, $budgetType, $lines) {
-            foreach ($lines as $index => $line) {
-                $lineData = [
-                    'element_id' => $elementId,
-                    'budget_type' => $budgetType,
-                    'line_number' => $index,
-                    'description' => sanitize_string($line['description'] ?? ''),
-                    'quantity' => sanitize_float($line['quantity'] ?? 0),
-                    'unit' => sanitize_string($line['unit'] ?? 'stk'),
-                    'price_per_unit' => sanitize_float($line['price_per_unit'] ?? 0),
-                    'year_0_1' => sanitize_float($line['year_0_1'] ?? 0),
-                    'year_1_2' => sanitize_float($line['year_1_2'] ?? 0),
-                    'year_3_5' => sanitize_float($line['year_3_5'] ?? 0),
-                    'year_5_10' => sanitize_float($line['year_5_10'] ?? 0),
-                    'year_10_plus' => sanitize_float($line['year_10_plus'] ?? 0),
-                    'price_catalog_id' => !empty($line['price_catalog_id']) ? sanitize_int($line['price_catalog_id']) : null,
-                    'notes' => sanitize_string($line['notes'] ?? '')
-                ];
+            // OPTIMIZED: Bulk UPSERT using ON CONFLICT (PostgreSQL) or ON DUPLICATE KEY UPDATE (MySQL)
+            // This reduces 50+ queries to 1 query
 
-                if (!empty($line['id'])) {
-                    // Update existing line
-                    $id = sanitize_int($line['id']);
-                    db_update('budget_lines', $lineData, 'id = :id AND element_id = :element_id', [
-                        'id' => $id,
-                        'element_id' => $elementId
-                    ]);
-                } else {
-                    // Insert new line
-                    db_insert('budget_lines', $lineData);
+            if (empty($lines)) {
+                return ['lines_saved' => 0];
+            }
+
+            // Build bulk upsert query
+            if (DatabaseAbstraction::isPostgreSQL()) {
+                // PostgreSQL: Use INSERT ... ON CONFLICT ... DO UPDATE
+                $values = [];
+                $params = [];
+
+                foreach ($lines as $index => $line) {
+                    $lineNum = $index;
+                    $values[] = "(:element_id, :budget_type, :line_num_{$lineNum}, :desc_{$lineNum}, :qty_{$lineNum}, " .
+                                ":unit_{$lineNum}, :price_{$lineNum}, :y01_{$lineNum}, :y12_{$lineNum}, :y35_{$lineNum}, " .
+                                ":y510_{$lineNum}, :y10p_{$lineNum}, :cat_id_{$lineNum}, :notes_{$lineNum})";
+
+                    $params["line_num_{$lineNum}"] = $lineNum;
+                    $params["desc_{$lineNum}"] = sanitize_string($line['description'] ?? '');
+                    $params["qty_{$lineNum}"] = sanitize_float($line['quantity'] ?? 0);
+                    $params["unit_{$lineNum}"] = sanitize_string($line['unit'] ?? 'stk');
+                    $params["price_{$lineNum}"] = sanitize_float($line['price_per_unit'] ?? 0);
+                    $params["y01_{$lineNum}"] = sanitize_float($line['year_0_1'] ?? 0);
+                    $params["y12_{$lineNum}"] = sanitize_float($line['year_1_2'] ?? 0);
+                    $params["y35_{$lineNum}"] = sanitize_float($line['year_3_5'] ?? 0);
+                    $params["y510_{$lineNum}"] = sanitize_float($line['year_5_10'] ?? 0);
+                    $params["y10p_{$lineNum}"] = sanitize_float($line['year_10_plus'] ?? 0);
+                    $params["cat_id_{$lineNum}"] = !empty($line['price_catalog_id']) ? sanitize_int($line['price_catalog_id']) : null;
+                    $params["notes_{$lineNum}"] = sanitize_string($line['notes'] ?? '');
                 }
+
+                $params['element_id'] = $elementId;
+                $params['budget_type'] = $budgetType;
+
+                $valuesStr = implode(', ', $values);
+
+                db_execute("
+                    INSERT INTO budget_lines (
+                        element_id, budget_type, line_number, description, quantity, unit,
+                        price_per_unit, year_0_1, year_1_2, year_3_5, year_5_10, year_10_plus,
+                        price_catalog_id, notes
+                    )
+                    VALUES {$valuesStr}
+                    ON CONFLICT (element_id, budget_type, line_number)
+                    DO UPDATE SET
+                        description = EXCLUDED.description,
+                        quantity = EXCLUDED.quantity,
+                        unit = EXCLUDED.unit,
+                        price_per_unit = EXCLUDED.price_per_unit,
+                        year_0_1 = EXCLUDED.year_0_1,
+                        year_1_2 = EXCLUDED.year_1_2,
+                        year_3_5 = EXCLUDED.year_3_5,
+                        year_5_10 = EXCLUDED.year_5_10,
+                        year_10_plus = EXCLUDED.year_10_plus,
+                        price_catalog_id = EXCLUDED.price_catalog_id,
+                        notes = EXCLUDED.notes,
+                        updated_at = CURRENT_TIMESTAMP
+                ", $params);
+            } else {
+                // MySQL: Use INSERT ... ON DUPLICATE KEY UPDATE
+                $values = [];
+                $params = [];
+
+                foreach ($lines as $index => $line) {
+                    $lineNum = $index;
+                    $values[] = "(:element_id, :budget_type, :line_num_{$lineNum}, :desc_{$lineNum}, :qty_{$lineNum}, " .
+                                ":unit_{$lineNum}, :price_{$lineNum}, :y01_{$lineNum}, :y12_{$lineNum}, :y35_{$lineNum}, " .
+                                ":y510_{$lineNum}, :y10p_{$lineNum}, :cat_id_{$lineNum}, :notes_{$lineNum})";
+
+                    $params["line_num_{$lineNum}"] = $lineNum;
+                    $params["desc_{$lineNum}"] = sanitize_string($line['description'] ?? '');
+                    $params["qty_{$lineNum}"] = sanitize_float($line['quantity'] ?? 0);
+                    $params["unit_{$lineNum}"] = sanitize_string($line['unit'] ?? 'stk');
+                    $params["price_{$lineNum}"] = sanitize_float($line['price_per_unit'] ?? 0);
+                    $params["y01_{$lineNum}"] = sanitize_float($line['year_0_1'] ?? 0);
+                    $params["y12_{$lineNum}"] = sanitize_float($line['year_1_2'] ?? 0);
+                    $params["y35_{$lineNum}"] = sanitize_float($line['year_3_5'] ?? 0);
+                    $params["y510_{$lineNum}"] = sanitize_float($line['year_5_10'] ?? 0);
+                    $params["y10p_{$lineNum}"] = sanitize_float($line['year_10_plus'] ?? 0);
+                    $params["cat_id_{$lineNum}"] = !empty($line['price_catalog_id']) ? sanitize_int($line['price_catalog_id']) : null;
+                    $params["notes_{$lineNum}"] = sanitize_string($line['notes'] ?? '');
+                }
+
+                $params['element_id'] = $elementId;
+                $params['budget_type'] = $budgetType;
+
+                $valuesStr = implode(', ', $values);
+
+                db_execute("
+                    INSERT INTO budget_lines (
+                        element_id, budget_type, line_number, description, quantity, unit,
+                        price_per_unit, year_0_1, year_1_2, year_3_5, year_5_10, year_10_plus,
+                        price_catalog_id, notes
+                    )
+                    VALUES {$valuesStr}
+                    ON DUPLICATE KEY UPDATE
+                        description = VALUES(description),
+                        quantity = VALUES(quantity),
+                        unit = VALUES(unit),
+                        price_per_unit = VALUES(price_per_unit),
+                        year_0_1 = VALUES(year_0_1),
+                        year_1_2 = VALUES(year_1_2),
+                        year_3_5 = VALUES(year_3_5),
+                        year_5_10 = VALUES(year_5_10),
+                        year_10_plus = VALUES(year_10_plus),
+                        price_catalog_id = VALUES(price_catalog_id),
+                        notes = VALUES(notes),
+                        updated_at = CURRENT_TIMESTAMP
+                ", $params);
             }
 
             // Update element's CAPEX if budget type is capex

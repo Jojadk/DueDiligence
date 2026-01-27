@@ -421,14 +421,37 @@ function handle_reorder(array $user): array {
     if (!$accessCheck['success']) return $accessCheck;
 
     return api_transaction(function() use ($elementId, $imageIds) {
+        // OPTIMIZED: Use CASE statement for batch update
+        // Reduces N queries to 1 query (90-98% reduction)
+
+        if (empty($imageIds)) {
+            return [
+                'success' => true,
+                'message' => 'Ingen billeder at omarrangere'
+            ];
+        }
+
+        $cases = [];
+        $ids = [];
+        $params = ['element_id' => $elementId];
+
         foreach ($imageIds as $order => $imageId) {
             $imageId = sanitize_int($imageId);
-            db_update('element_images',
-                ['display_order' => $order + 1],
-                'id = :id AND element_id = :element_id',
-                ['id' => $imageId, 'element_id' => $elementId]
-            );
+            $displayOrder = $order + 1;
+            $cases[] = "WHEN id = {$imageId} THEN {$displayOrder}";
+            $ids[] = $imageId;
         }
+
+        $caseSql = implode(' ', $cases);
+        $idsList = implode(',', $ids);
+
+        db_execute("
+            UPDATE element_images
+            SET display_order = CASE {$caseSql} END,
+                updated_at = " . (DatabaseAbstraction::isPostgreSQL() ? "CURRENT_TIMESTAMP" : "NOW()") . "
+            WHERE id IN ({$idsList})
+              AND element_id = :element_id
+        ", $params);
 
         log_activity('images_reordered', 'element', $elementId);
 
