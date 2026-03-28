@@ -1,0 +1,348 @@
+/**
+ * Styles for Live Updates and Locking System
+ * Subtle, non-intrusive visual feedback
+ */
+
+/* =================================================================
+   Lock Indicators
+   ================================================================= */
+
+/* Locked by current user */
+.locked-by-self {
+    border-left: 3px solid #3B82F6; /* Blue */
+    background-color: #EFF6FF;
+    transition: all 0.2s ease;
+}
+
+/* Locked by another user */
+.locked-by-other {
+    border-left: 3px solid #EF4444; /* Red */
+    background-color: #FEE2E2;
+    cursor: not-allowed;
+    opacity: 0.7;
+}
+
+/* Lock indicator label */
+.lock-indicator {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 11px;
+    color: #6B7280;
+    padding: 2px 6px;
+    background: rgba(255, 255, 255, 0.9);
+    border-radius: 3px;
+    margin-left: 8px;
+    position: absolute;
+    right: 8px;
+    top: 50%;
+    transform: translateY(-50%);
+    pointer-events: none;
+    z-index: 10;
+    animation: fadeIn 0.2s ease;
+}
+
+.lock-indicator i {
+    font-size: 10px;
+}
+
+.locked-by-self .lock-indicator {
+    color: #3B82F6;
+}
+
+.locked-by-other .lock-indicator {
+    color: #EF4444;
+}
+
+/* =================================================================
+   Live Update Animations
+   ================================================================= */
+
+/* Cell that was just updated */
+.live-updated {
+    animation: liveUpdateFlash 1s ease;
+}
+
+@keyframes liveUpdateFlash {
+    0% {
+        background-color: #FEF3C7; /* Yellow highlight */
+    }
+    100% {
+        background-color: transparent;
+    }
+}
+
+/* Updating total */
+.updating {
+    animation: pulse 0.4s ease;
+    color: #3B82F6;
+}
+
+@keyframes pulse {
+    0%, 100% {
+        opacity: 1;
+        transform: scale(1);
+    }
+    50% {
+        opacity: 0.7;
+        transform: scale(1.05);
+    }
+}
+
+/* =================================================================
+   Live Update Badge (notification)
+   ================================================================= */
+
+.live-update-badge {
+    position: fixed;
+    bottom: 24px;
+    right: 24px;
+    background: #3B82F6;
+    color: white;
+    padding: 8px 16px;
+    border-radius: 20px;
+    font-size: 13px;
+    font-weight: 500;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1), 0 2px 4px rgba(0, 0, 0, 0.06);
+    opacity: 0;
+    transform: translateY(20px);
+    transition: all 0.3s ease;
+    pointer-events: none;
+    z-index: 1000;
+}
+
+.live-update-badge.show {
+    opacity: 1;
+    transform: translateY(0);
+}
+
+/* =================================================================
+   Field Status Indicators
+   ================================================================= */
+
+/* Container for input fields with status */
+.field-container {
+    position: relative;
+}
+
+/* Status dot */
+.field-status {
+    position: absolute;
+    right: 8px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    transition: all 0.2s ease;
+}
+
+.field-status.idle {
+    background: #D1D5DB; /* Gray */
+}
+
+.field-status.editing {
+    background: #3B82F6; /* Blue */
+    animation: breathe 2s ease infinite;
+}
+
+.field-status.locked {
+    background: #EF4444; /* Red */
+}
+
+.field-status.saving {
+    background: #10B981; /* Green */
+    animation: spin 1s linear infinite;
+}
+
+@keyframes breathe {
+    0%, 100% {
+        opacity: 1;
+    }
+    50% {
+        opacity: 0.5;
+    }
+}
+
+@keyframes spin {
+    from {
+        transform: translateY(-50%) rotate(0deg);
+    }
+    to {
+        transform: translateY(-50%) rotate(360deg);
+    }
+}
+
+/* =================================================================
+   Budget Table Specific
+   ================================================================= */
+
+#budget-table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+#budget-table th {
+    background: #F3F4F6;
+    padding: 12px 8px;
+    text-align: left;
+    font-weight: 600;
+    font-size: 14px;
+    border-bottom: 2px solid #E5E7EB;
+    position: sticky;
+    top: 0;
+    z-index: 10;
+}
+
+#budget-table td {
+    padding: 8px;
+    border-bottom: 1px solid #E5E7EB;
+    position: relative;
+    transition: background-color 0.2s ease;
+}
+
+#budget-table tr:hover td {
+    background-color: #F9FAFB;
+}
+
+#budget-table input,
+#budget-table textarea,
+#budget-table select {
+    width: 100%;
+    padding: 6px 8px;
+    border: 1px solid #D1D5DB;
+    border-radius: 4px;
+    font-size: 14px;
+    transition: all 0.2s ease;
+}
+
+#budget-table input:focus,
+#budget-table textarea:focus,
+#budget-table select:focus {
+    outline: none;
+    border-color: #3B82F6;
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+}
+
+#budget-total {
+    font-size: 20px;
+    font-weight: 700;
+    color: #1F2937;
+}
+
+/* =================================================================
+   Responsive Adjustments
+   ================================================================= */
+
+@media (max-width: 768px) {
+    .lock-indicator {
+        font-size: 10px;
+        padding: 1px 4px;
+    }
+
+    .live-update-badge {
+        bottom: 16px;
+        right: 16px;
+        font-size: 12px;
+        padding: 6px 12px;
+    }
+
+    #budget-table th,
+    #budget-table td {
+        padding: 6px 4px;
+        font-size: 13px;
+    }
+}
+
+/* =================================================================
+   Accessibility
+   ================================================================= */
+
+/* High contrast mode support */
+@media (prefers-contrast: high) {
+    .locked-by-self {
+        border-left-width: 4px;
+    }
+
+    .locked-by-other {
+        border-left-width: 4px;
+    }
+
+    .lock-indicator {
+        font-weight: 600;
+    }
+}
+
+/* Reduced motion support */
+@media (prefers-reduced-motion: reduce) {
+    .live-updated,
+    .updating,
+    .live-update-badge,
+    .field-status,
+    * {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+    }
+}
+
+/* =================================================================
+   Utility Classes
+   ================================================================= */
+
+.fade-in {
+    animation: fadeIn 0.3s ease;
+}
+
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+    }
+    to {
+        opacity: 1;
+    }
+}
+
+.slide-in {
+    animation: slideIn 0.3s ease;
+}
+
+@keyframes slideIn {
+    from {
+        transform: translateX(-10px);
+        opacity: 0;
+    }
+    to {
+        transform: translateX(0);
+        opacity: 1;
+    }
+}
+
+/* Loading spinner */
+.spinner {
+    display: inline-block;
+    width: 16px;
+    height: 16px;
+    border: 2px solid #E5E7EB;
+    border-top-color: #3B82F6;
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+}
+
+/* Subtle highlight */
+.highlight {
+    background-color: #FEF3C7;
+    transition: background-color 0.5s ease;
+}
+
+/* Success state */
+.success {
+    background-color: #D1FAE5;
+    transition: background-color 0.5s ease;
+}
+
+/* Error state */
+.error {
+    background-color: #FEE2E2;
+    border-color: #EF4444;
+}

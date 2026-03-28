@@ -1,0 +1,491 @@
+/**
+ * Dark Mode Theme
+ * Modern dark theme with accessibility support
+ *
+ * @version 1.0.0
+ */
+
+/* ============================================
+   CSS Variables - Light Theme (Default)
+   ============================================ */
+
+:root {
+    /* Primary colors */
+    --color-primary: #3498db;
+    --color-primary-dark: #2980b9;
+    --color-primary-light: #5dade2;
+
+    /* Secondary colors */
+    --color-secondary: #95a5a6;
+    --color-success: #2ecc71;
+    --color-warning: #f39c12;
+    --color-danger: #e74c3c;
+    --color-info: #3498db;
+
+    /* Background colors */
+    --bg-primary: #ffffff;
+    --bg-secondary: #f8f9fa;
+    --bg-tertiary: #ecf0f1;
+    --bg-hover: #e9ecef;
+    --bg-active: #dee2e6;
+
+    /* Text colors */
+    --text-primary: #2c3e50;
+    --text-secondary: #7f8c8d;
+    --text-tertiary: #95a5a6;
+    --text-inverse: #ffffff;
+
+    /* Border colors */
+    --border-color: #e9ecef;
+    --border-color-dark: #dee2e6;
+    --border-color-light: #f8f9fa;
+
+    /* Shadow colors */
+    --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.1);
+    --shadow-md: 0 4px 6px rgba(0, 0, 0, 0.1);
+    --shadow-lg: 0 10px 15px rgba(0, 0, 0, 0.1);
+    --shadow-xl: 0 20px 25px rgba(0, 0, 0, 0.1);
+
+    /* Input colors */
+    --input-bg: #ffffff;
+    --input-border: #ced4da;
+    --input-focus-border: #3498db;
+    --input-placeholder: #95a5a6;
+
+    /* Modal/Overlay */
+    --overlay-bg: rgba(0, 0, 0, 0.6);
+    --modal-bg: #ffffff;
+
+    /* Sidebar */
+    --sidebar-bg: #2c3e50;
+    --sidebar-text: #ecf0f1;
+    --sidebar-hover: #34495e;
+    --sidebar-active: #3498db;
+
+    /* Header */
+    --header-bg: #ffffff;
+    --header-border: #e9ecef;
+
+    /* Card */
+    --card-bg: #ffffff;
+    --card-border: #e9ecef;
+
+    /* Table */
+    --table-header-bg: #f8f9fa;
+    --table-row-hover: #f8f9fa;
+    --table-border: #dee2e6;
+
+    /* Button */
+    --btn-primary-bg: #3498db;
+    --btn-primary-text: #ffffff;
+    --btn-secondary-bg: #ecf0f1;
+    --btn-secondary-text: #555555;
+
+    /* Scrollbar */
+    --scrollbar-track: #f1f1f1;
+    --scrollbar-thumb: #c1c1c1;
+    --scrollbar-thumb-hover: #a8a8a8;
+}
+
+/* ============================================
+   Dark Theme Variables
+   ============================================ */
+
+[data-theme="dark"] {
+    /* Primary colors (slightly muted) */
+    --color-primary: #5dade2;
+    --color-primary-dark: #3498db;
+    --color-primary-light: #85c1e9;
+
+    /* Secondary colors */
+    --color-secondary: #7f8c8d;
+    --color-success: #27ae60;
+    --color-warning: #e67e22;
+    --color-danger: #c0392b;
+    --color-info: #5dade2;
+
+    /* Background colors */
+    --bg-primary: #1a1a1a;
+    --bg-secondary: #242424;
+    --bg-tertiary: #2d2d2d;
+    --bg-hover: #333333;
+    --bg-active: #3d3d3d;
+
+    /* Text colors */
+    --text-primary: #e0e0e0;
+    --text-secondary: #a0a0a0;
+    --text-tertiary: #808080;
+    --text-inverse: #1a1a1a;
+
+    /* Border colors */
+    --border-color: #333333;
+    --border-color-dark: #404040;
+    --border-color-light: #2d2d2d;
+
+    /* Shadow colors (darker shadows for dark mode) */
+    --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.3);
+    --shadow-md: 0 4px 6px rgba(0, 0, 0, 0.3);
+    --shadow-lg: 0 10px 15px rgba(0, 0, 0, 0.3);
+    --shadow-xl: 0 20px 25px rgba(0, 0, 0, 0.3);
+
+    /* Input colors */
+    --input-bg: #2d2d2d;
+    --input-border: #404040;
+    --input-focus-border: #5dade2;
+    --input-placeholder: #808080;
+
+    /* Modal/Overlay */
+    --overlay-bg: rgba(0, 0, 0, 0.8);
+    --modal-bg: #242424;
+
+    /* Sidebar */
+    --sidebar-bg: #1a1a1a;
+    --sidebar-text: #e0e0e0;
+    --sidebar-hover: #2d2d2d;
+    --sidebar-active: #5dade2;
+
+    /* Header */
+    --header-bg: #242424;
+    --header-border: #333333;
+
+    /* Card */
+    --card-bg: #242424;
+    --card-border: #333333;
+
+    /* Table */
+    --table-header-bg: #2d2d2d;
+    --table-row-hover: #2d2d2d;
+    --table-border: #333333;
+
+    /* Button */
+    --btn-primary-bg: #5dade2;
+    --btn-primary-text: #1a1a1a;
+    --btn-secondary-bg: #2d2d2d;
+    --btn-secondary-text: #e0e0e0;
+
+    /* Scrollbar */
+    --scrollbar-track: #242424;
+    --scrollbar-thumb: #404040;
+    --scrollbar-thumb-hover: #4d4d4d;
+}
+
+/* ============================================
+   Apply Theme Variables
+   ============================================ */
+
+/* Body */
+body {
+    background-color: var(--bg-secondary);
+    color: var(--text-primary);
+    transition: background-color 0.3s ease, color 0.3s ease;
+}
+
+/* Header */
+.app-header {
+    background-color: var(--header-bg);
+    border-bottom: 1px solid var(--header-border);
+}
+
+/* Sidebar */
+.app-sidebar {
+    background-color: var(--sidebar-bg);
+    color: var(--sidebar-text);
+}
+
+.app-sidebar .nav-item {
+    color: var(--sidebar-text);
+}
+
+.app-sidebar .nav-item:hover {
+    background-color: var(--sidebar-hover);
+}
+
+.app-sidebar .nav-item.active {
+    background-color: var(--sidebar-active);
+}
+
+.nav-section-title {
+    color: var(--text-secondary);
+}
+
+/* Main content */
+.app-main {
+    background-color: var(--bg-secondary);
+}
+
+.main-content {
+    background-color: var(--bg-primary);
+}
+
+/* Cards */
+.card {
+    background-color: var(--card-bg);
+    border-color: var(--card-border);
+    box-shadow: var(--shadow-sm);
+}
+
+/* Modals */
+.modal-content {
+    background-color: var(--modal-bg);
+    color: var(--text-primary);
+}
+
+.backdrop {
+    background-color: var(--overlay-bg);
+}
+
+/* Inputs */
+input,
+textarea,
+select {
+    background-color: var(--input-bg);
+    color: var(--text-primary);
+    border-color: var(--input-border);
+}
+
+input:focus,
+textarea:focus,
+select:focus {
+    border-color: var(--input-focus-border);
+}
+
+input::placeholder,
+textarea::placeholder {
+    color: var(--input-placeholder);
+}
+
+/* Buttons */
+.btn-primary {
+    background-color: var(--btn-primary-bg);
+    color: var(--btn-primary-text);
+}
+
+.btn-secondary {
+    background-color: var(--btn-secondary-bg);
+    color: var(--btn-secondary-text);
+}
+
+/* Tables */
+table {
+    background-color: var(--card-bg);
+    border-color: var(--table-border);
+}
+
+thead {
+    background-color: var(--table-header-bg);
+}
+
+tbody tr:hover {
+    background-color: var(--table-row-hover);
+}
+
+td, th {
+    border-color: var(--table-border);
+}
+
+/* Borders */
+hr {
+    border-color: var(--border-color);
+}
+
+/* Search */
+.search-input {
+    background-color: var(--input-bg);
+    color: var(--text-primary);
+    border-color: var(--input-border);
+}
+
+.search-results {
+    background-color: var(--modal-bg);
+    border-color: var(--border-color);
+    box-shadow: var(--shadow-lg);
+}
+
+/* Notifications */
+.notification-panel {
+    background-color: var(--modal-bg);
+    border-color: var(--border-color);
+}
+
+.toast {
+    background-color: var(--card-bg);
+    color: var(--text-primary);
+    box-shadow: var(--shadow-lg);
+}
+
+/* Scrollbar (webkit) */
+::-webkit-scrollbar {
+    width: 12px;
+    height: 12px;
+}
+
+::-webkit-scrollbar-track {
+    background: var(--scrollbar-track);
+}
+
+::-webkit-scrollbar-thumb {
+    background: var(--scrollbar-thumb);
+    border-radius: 6px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: var(--scrollbar-thumb-hover);
+}
+
+/* Firefox scrollbar */
+* {
+    scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
+    scrollbar-width: thin;
+}
+
+/* ============================================
+   Dark Mode Toggle Button
+   ============================================ */
+
+.theme-toggle {
+    position: relative;
+    width: 48px;
+    height: 24px;
+    background-color: var(--bg-tertiary);
+    border-radius: 12px;
+    cursor: pointer;
+    transition: background-color 0.3s ease;
+    border: 1px solid var(--border-color);
+}
+
+.theme-toggle:hover {
+    background-color: var(--bg-hover);
+}
+
+.theme-toggle-slider {
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 18px;
+    height: 18px;
+    background-color: var(--text-primary);
+    border-radius: 50%;
+    transition: transform 0.3s ease, background-color 0.3s ease;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 10px;
+}
+
+[data-theme="dark"] .theme-toggle-slider {
+    transform: translateX(24px);
+}
+
+.theme-toggle-slider::before {
+    content: '☀️';
+}
+
+[data-theme="dark"] .theme-toggle-slider::before {
+    content: '🌙';
+}
+
+/* ============================================
+   Syntax Highlighting (Code Blocks)
+   ============================================ */
+
+[data-theme="dark"] code {
+    background-color: var(--bg-tertiary);
+    color: #f8f8f2;
+}
+
+[data-theme="dark"] pre {
+    background-color: var(--bg-tertiary);
+    border-color: var(--border-color);
+}
+
+/* ============================================
+   Images and Media (Dark Mode Adjustments)
+   ============================================ */
+
+[data-theme="dark"] img {
+    opacity: 0.9;
+}
+
+[data-theme="dark"] img:hover {
+    opacity: 1;
+}
+
+/* Invert icons if they're SVG */
+[data-theme="dark"] svg {
+    filter: brightness(0.9);
+}
+
+/* ============================================
+   Loading States (Dark Mode)
+   ============================================ */
+
+[data-theme="dark"] .skeleton {
+    background: linear-gradient(
+        90deg,
+        #2d2d2d 0%,
+        #333333 50%,
+        #2d2d2d 100%
+    );
+    background-size: 200% 100%;
+}
+
+[data-theme="dark"] .spinner {
+    border-color: var(--bg-tertiary);
+    border-top-color: var(--color-primary);
+}
+
+/* ============================================
+   Accessibility - High Contrast Mode
+   ============================================ */
+
+@media (prefers-contrast: high) {
+    [data-theme="dark"] {
+        --bg-primary: #000000;
+        --bg-secondary: #0a0a0a;
+        --text-primary: #ffffff;
+        --border-color: #ffffff;
+    }
+}
+
+/* ============================================
+   Transition Performance
+   ============================================ */
+
+/* Disable transitions during theme switch for better performance */
+body.theme-transitioning,
+body.theme-transitioning * {
+    transition: none !important;
+}
+
+/* ============================================
+   Print Styles
+   ============================================ */
+
+@media print {
+    /* Force light theme for printing */
+    [data-theme="dark"] {
+        --bg-primary: #ffffff;
+        --bg-secondary: #f8f9fa;
+        --text-primary: #2c3e50;
+        --border-color: #e9ecef;
+    }
+
+    .theme-toggle {
+        display: none;
+    }
+}
+
+/* ============================================
+   Reduced Motion
+   ============================================ */
+
+@media (prefers-reduced-motion: reduce) {
+    .theme-toggle,
+    .theme-toggle-slider {
+        transition: none;
+    }
+
+    body {
+        transition: none;
+    }
+}

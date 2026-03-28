@@ -1,0 +1,539 @@
+{
+  "system": {
+    "name": "DueDiligence v2.0",
+    "version": "2.0.0",
+    "database": {
+      "type": "pgsql",
+      "host": "localhost",
+      "port": 5432,
+      "database": "duediligence",
+      "username": "",
+      "password": ""
+    }
+  },
+
+  "forms": {
+    "customer": {
+      "title": "Kunde",
+      "icon": "user",
+      "table": "customers",
+      "fields": [
+        {
+          "name": "name",
+          "label": "Firmanavn",
+          "type": "text",
+          "required": true,
+          "locked": true,
+          "maxlength": 255,
+          "placeholder": "Indtast firmanavn"
+        },
+        {
+          "name": "cvr_number",
+          "label": "CVR Nummer",
+          "type": "text",
+          "required": false,
+          "locked": false,
+          "maxlength": 50,
+          "pattern": "^[0-9]{8}$",
+          "help": "8 cifre"
+        },
+        {
+          "name": "contact_person",
+          "label": "Kontaktperson",
+          "type": "text",
+          "required": false,
+          "locked": false,
+          "maxlength": 255
+        },
+        {
+          "name": "email",
+          "label": "Email",
+          "type": "email",
+          "required": false,
+          "locked": false,
+          "maxlength": 255
+        },
+        {
+          "name": "phone",
+          "label": "Telefon",
+          "type": "tel",
+          "required": false,
+          "locked": false,
+          "maxlength": 50
+        },
+        {
+          "name": "address",
+          "label": "Adresse",
+          "type": "text",
+          "required": false,
+          "locked": false,
+          "maxlength": 255
+        },
+        {
+          "name": "postal_code",
+          "label": "Postnummer",
+          "type": "text",
+          "required": false,
+          "locked": false,
+          "maxlength": 10
+        },
+        {
+          "name": "city",
+          "label": "By",
+          "type": "text",
+          "required": false,
+          "locked": false,
+          "maxlength": 100
+        },
+        {
+          "name": "notes",
+          "label": "Noter",
+          "type": "textarea",
+          "required": false,
+          "locked": false,
+          "rows": 5,
+          "maxlength": 2000
+        }
+      ]
+    },
+
+    "project": {
+      "title": "Projekt",
+      "icon": "folder",
+      "table": "projects",
+      "fields": [
+        {
+          "name": "name",
+          "label": "Projekt Navn",
+          "type": "text",
+          "required": true,
+          "locked": true,
+          "maxlength": 255,
+          "placeholder": "Indtast projektnavn"
+        },
+        {
+          "name": "customer_id",
+          "label": "Kunde",
+          "type": "searchable_select",
+          "required": true,
+          "locked": true,
+          "source": {
+            "table": "customers",
+            "value_field": "id",
+            "label_field": "name",
+            "search_fields": ["name", "cvr_number"],
+            "order_by": "name ASC"
+          }
+        },
+        {
+          "name": "address",
+          "label": "Adresse",
+          "type": "text",
+          "required": true,
+          "locked": true,
+          "maxlength": 255
+        },
+        {
+          "name": "postal_code",
+          "label": "Postnummer",
+          "type": "text",
+          "required": true,
+          "locked": true,
+          "maxlength": 10
+        },
+        {
+          "name": "city",
+          "label": "By",
+          "type": "text",
+          "required": true,
+          "locked": true,
+          "maxlength": 100
+        },
+        {
+          "name": "bbr_number",
+          "label": "BBR Nummer",
+          "type": "text",
+          "required": false,
+          "locked": false,
+          "maxlength": 50,
+          "help": "Bygnings- og Boligregistret nummer"
+        },
+        {
+          "name": "inspection_date",
+          "label": "Besigtigelsesdato",
+          "type": "date",
+          "required": false,
+          "locked": false
+        },
+        {
+          "name": "description",
+          "label": "Beskrivelse",
+          "type": "textarea",
+          "required": false,
+          "locked": false,
+          "rows": 5,
+          "maxlength": 2000
+        },
+        {
+          "name": "status",
+          "label": "Status",
+          "type": "select",
+          "required": true,
+          "locked": true,
+          "default": "planning",
+          "options": [
+            {"value": "planning", "label": "Planlægning"},
+            {"value": "active", "label": "Aktiv"},
+            {"value": "on_hold", "label": "På vent"},
+            {"value": "completed", "label": "Afsluttet"},
+            {"value": "archived", "label": "Arkiveret"}
+          ]
+        }
+      ]
+    },
+
+    "building": {
+      "title": "Bygning",
+      "icon": "building",
+      "table": "buildings",
+      "fields": [
+        {
+          "name": "project_id",
+          "label": "Projekt",
+          "type": "searchable_select",
+          "required": true,
+          "locked": true,
+          "source": {
+            "table": "projects",
+            "value_field": "id",
+            "label_field": "name",
+            "search_fields": ["name", "address"],
+            "order_by": "name ASC"
+          }
+        },
+        {
+          "name": "name",
+          "label": "Bygningsnavn",
+          "type": "text",
+          "required": true,
+          "locked": true,
+          "maxlength": 255,
+          "placeholder": "F.eks. Hovedbygning, Anneks A"
+        },
+        {
+          "name": "building_number",
+          "label": "Bygningsnummer",
+          "type": "text",
+          "required": false,
+          "locked": false,
+          "maxlength": 50
+        },
+        {
+          "name": "area_m2",
+          "label": "Areal (m²)",
+          "type": "number",
+          "required": false,
+          "locked": false,
+          "min": 0,
+          "step": 0.01
+        },
+        {
+          "name": "construction_year",
+          "label": "Opførelsesår",
+          "type": "number",
+          "required": false,
+          "locked": false,
+          "min": 1800,
+          "max": 2100
+        },
+        {
+          "name": "renovation_year",
+          "label": "Renoveringsår",
+          "type": "number",
+          "required": false,
+          "locked": false,
+          "min": 1800,
+          "max": 2100
+        },
+        {
+          "name": "heating_type",
+          "label": "Opvarmningstype",
+          "type": "select",
+          "required": false,
+          "locked": false,
+          "options": [
+            {"value": "fjernvarme", "label": "Fjernvarme"},
+            {"value": "naturgas", "label": "Naturgas"},
+            {"value": "olie", "label": "Olie"},
+            {"value": "varmepumpe", "label": "Varmepumpe"},
+            {"value": "el", "label": "El"},
+            {"value": "andet", "label": "Andet"}
+          ]
+        },
+        {
+          "name": "usage_type",
+          "label": "Anvendelse",
+          "type": "select",
+          "required": false,
+          "locked": false,
+          "options": [
+            {"value": "bolig", "label": "Bolig"},
+            {"value": "erhverv", "label": "Erhverv"},
+            {"value": "blandet", "label": "Blandet"},
+            {"value": "offentlig", "label": "Offentlig"}
+          ]
+        },
+        {
+          "name": "floors",
+          "label": "Antal etager",
+          "type": "number",
+          "required": false,
+          "locked": false,
+          "min": 1,
+          "max": 100
+        },
+        {
+          "name": "description",
+          "label": "Beskrivelse",
+          "type": "textarea",
+          "required": false,
+          "locked": false,
+          "rows": 5,
+          "maxlength": 2000
+        }
+      ]
+    },
+
+    "building_element": {
+      "title": "Bygningsdel",
+      "icon": "list",
+      "table": "building_elements",
+      "fields": [
+        {
+          "name": "building_id",
+          "label": "Bygning",
+          "type": "searchable_select",
+          "required": true,
+          "locked": true,
+          "source": {
+            "table": "buildings",
+            "value_field": "id",
+            "label_field": "name",
+            "search_fields": ["name", "building_number"],
+            "order_by": "name ASC",
+            "join": {
+              "table": "projects",
+              "on": "buildings.project_id = projects.id",
+              "display": "projects.name"
+            }
+          }
+        },
+        {
+          "name": "parent_id",
+          "label": "Overordnet element",
+          "type": "searchable_select",
+          "required": false,
+          "locked": false,
+          "source": {
+            "table": "building_elements",
+            "value_field": "id",
+            "label_field": "name",
+            "search_fields": ["name", "location"],
+            "order_by": "name ASC",
+            "filter": "building_id = {building_id}"
+          },
+          "help": "Lad stå tom for rodelement"
+        },
+        {
+          "name": "name",
+          "label": "Navn",
+          "type": "text",
+          "required": true,
+          "locked": true,
+          "maxlength": 255,
+          "placeholder": "F.eks. Tag, Facade Nord"
+        },
+        {
+          "name": "element_type",
+          "label": "Type",
+          "type": "select",
+          "required": true,
+          "locked": true,
+          "options": [
+            {"value": "facade", "label": "Facade"},
+            {"value": "roof", "label": "Tag"},
+            {"value": "foundation", "label": "Fundament"},
+            {"value": "windows", "label": "Vinduer"},
+            {"value": "doors", "label": "Døre"},
+            {"value": "heating", "label": "Varme"},
+            {"value": "ventilation", "label": "Ventilation"},
+            {"value": "electrical", "label": "El"},
+            {"value": "plumbing", "label": "VVS"},
+            {"value": "drainage", "label": "Afløb"},
+            {"value": "other", "label": "Andet"}
+          ]
+        },
+        {
+          "name": "location",
+          "label": "Placering",
+          "type": "text",
+          "required": false,
+          "locked": false,
+          "maxlength": 255,
+          "placeholder": "F.eks. 1. sal, Kælder"
+        },
+        {
+          "name": "description",
+          "label": "Beskrivelse",
+          "type": "textarea",
+          "required": false,
+          "locked": false,
+          "rows": 8,
+          "maxlength": 5000
+        },
+        {
+          "name": "condition_score",
+          "label": "Tilstandskarakter (0-10)",
+          "type": "number",
+          "required": false,
+          "locked": false,
+          "min": 0,
+          "max": 10,
+          "help": "0 = Dårlig, 10 = Perfekt"
+        },
+        {
+          "name": "urgency",
+          "label": "Hastighed",
+          "type": "select",
+          "required": false,
+          "locked": false,
+          "options": [
+            {"value": "low", "label": "Lav"},
+            {"value": "medium", "label": "Medium"},
+            {"value": "high", "label": "Høj"},
+            {"value": "critical", "label": "Kritisk"}
+          ]
+        },
+        {
+          "name": "time_horizon",
+          "label": "Tidshorisont",
+          "type": "select",
+          "required": false,
+          "locked": false,
+          "options": [
+            {"value": "0-1", "label": "0-1 år"},
+            {"value": "1-2", "label": "1-2 år"},
+            {"value": "3-5", "label": "3-5 år"},
+            {"value": "5-10", "label": "5-10 år"},
+            {"value": "10+", "label": "10+ år"}
+          ]
+        },
+        {
+          "name": "capex",
+          "label": "CAPEX (DKK)",
+          "type": "number",
+          "required": false,
+          "locked": false,
+          "min": 0,
+          "step": 0.01,
+          "help": "Capital Expenditure"
+        },
+        {
+          "name": "replacement_value",
+          "label": "Genanskaffelsesværdi (DKK)",
+          "type": "number",
+          "required": false,
+          "locked": false,
+          "min": 0,
+          "step": 0.01
+        },
+        {
+          "name": "price_catalog_id",
+          "label": "Priskatalog template",
+          "type": "searchable_select",
+          "required": false,
+          "locked": false,
+          "source": {
+            "table": "price_catalogs",
+            "value_field": "id",
+            "label_field": "name",
+            "search_fields": ["name", "category", "description"],
+            "order_by": "category ASC, name ASC"
+          },
+          "help": "Vælg fra priskatalog eller lad stå tom for manuel indtastning"
+        }
+      ]
+    },
+
+    "price_catalog": {
+      "title": "Priskatalog",
+      "icon": "database",
+      "table": "price_catalogs",
+      "fields": [
+        {
+          "name": "name",
+          "label": "Navn",
+          "type": "text",
+          "required": true,
+          "locked": true,
+          "maxlength": 255
+        },
+        {
+          "name": "category",
+          "label": "Kategori",
+          "type": "select",
+          "required": true,
+          "locked": false,
+          "options": [
+            {"value": "facade", "label": "Facade"},
+            {"value": "roof", "label": "Tag"},
+            {"value": "foundation", "label": "Fundament"},
+            {"value": "windows", "label": "Vinduer"},
+            {"value": "doors", "label": "Døre"},
+            {"value": "heating", "label": "Varme"},
+            {"value": "ventilation", "label": "Ventilation"},
+            {"value": "electrical", "label": "El"},
+            {"value": "plumbing", "label": "VVS"},
+            {"value": "drainage", "label": "Afløb"},
+            {"value": "other", "label": "Andet"}
+          ]
+        },
+        {
+          "name": "description",
+          "label": "Beskrivelse",
+          "type": "textarea",
+          "required": false,
+          "locked": false,
+          "rows": 3,
+          "maxlength": 1000
+        },
+        {
+          "name": "unit",
+          "label": "Enhed",
+          "type": "text",
+          "required": true,
+          "locked": false,
+          "maxlength": 50,
+          "placeholder": "F.eks. m², stk, løbende m"
+        },
+        {
+          "name": "unit_price",
+          "label": "Enhedspris (DKK)",
+          "type": "number",
+          "required": true,
+          "locked": false,
+          "min": 0,
+          "step": 0.01
+        },
+        {
+          "name": "active",
+          "label": "Aktiv",
+          "type": "checkbox",
+          "required": false,
+          "locked": false,
+          "default": true
+        }
+      ]
+    }
+  }
+}

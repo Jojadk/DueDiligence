@@ -1,0 +1,716 @@
+/**
+ * User Guide System Styles
+ * Tooltips, tours, and contextual help
+ */
+
+/* ============================================
+   Tooltips
+   ============================================ */
+
+.user-guide-tooltip {
+    position: absolute;
+    z-index: 10000;
+    padding: 8px 12px;
+    background: #2c3e50;
+    color: #fff;
+    border-radius: 4px;
+    font-size: 13px;
+    line-height: 1.4;
+    max-width: 300px;
+    pointer-events: none;
+    opacity: 0;
+    transform: translateY(-5px);
+    transition: opacity 0.2s ease, transform 0.2s ease;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+.user-guide-tooltip.active {
+    opacity: 1;
+    transform: translateY(0);
+}
+
+/* Tooltip arrow */
+.user-guide-tooltip::before {
+    content: '';
+    position: absolute;
+    width: 0;
+    height: 0;
+    border: 6px solid transparent;
+}
+
+.user-guide-tooltip[data-placement="top"]::before {
+    bottom: -12px;
+    left: 50%;
+    transform: translateX(-50%);
+    border-top-color: #2c3e50;
+}
+
+.user-guide-tooltip[data-placement="bottom"]::before {
+    top: -12px;
+    left: 50%;
+    transform: translateX(-50%);
+    border-bottom-color: #2c3e50;
+}
+
+.user-guide-tooltip[data-placement="left"]::before {
+    right: -12px;
+    top: 50%;
+    transform: translateY(-50%);
+    border-left-color: #2c3e50;
+}
+
+.user-guide-tooltip[data-placement="right"]::before {
+    left: -12px;
+    top: 50%;
+    transform: translateY(-50%);
+    border-right-color: #2c3e50;
+}
+
+/* ============================================
+   Help Icon
+   ============================================ */
+
+.help-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 18px;
+    height: 18px;
+    margin-left: 6px;
+    background: #3498db;
+    color: #fff;
+    border-radius: 50%;
+    font-size: 12px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: background 0.2s ease, transform 0.2s ease;
+    vertical-align: middle;
+}
+
+.help-icon:hover {
+    background: #2980b9;
+    transform: scale(1.1);
+}
+
+.help-icon:active {
+    transform: scale(0.95);
+}
+
+/* ============================================
+   Tour System
+   ============================================ */
+
+/* Backdrop */
+.user-guide-backdrop {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.6);
+    z-index: 9998;
+    animation: fadeIn 0.3s ease;
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+
+/* Highlight element */
+.user-guide-highlight {
+    position: relative;
+    z-index: 9999;
+    box-shadow: 0 0 0 4px rgba(52, 152, 219, 0.5), 0 0 0 9999px rgba(0, 0, 0, 0.6);
+    border-radius: 4px;
+    animation: pulse 2s ease-in-out infinite;
+}
+
+@keyframes pulse {
+    0%, 100% {
+        box-shadow: 0 0 0 4px rgba(52, 152, 219, 0.5), 0 0 0 9999px rgba(0, 0, 0, 0.6);
+    }
+    50% {
+        box-shadow: 0 0 0 8px rgba(52, 152, 219, 0.3), 0 0 0 9999px rgba(0, 0, 0, 0.6);
+    }
+}
+
+/* Tour Modal (centered) */
+.user-guide-tour-modal {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    z-index: 10000;
+    background: #fff;
+    border-radius: 8px;
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+    max-width: 500px;
+    width: 90%;
+    animation: slideIn 0.3s ease;
+}
+
+@keyframes slideIn {
+    from {
+        opacity: 0;
+        transform: translate(-50%, -45%);
+    }
+    to {
+        opacity: 1;
+        transform: translate(-50%, -50%);
+    }
+}
+
+/* Tour Tooltip (positioned) */
+.user-guide-tour-tooltip {
+    position: absolute;
+    z-index: 10000;
+    background: #fff;
+    border-radius: 8px;
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+    max-width: 400px;
+    animation: slideIn 0.3s ease;
+}
+
+.user-guide-tour-tooltip.placement-top {
+    animation: slideInTop 0.3s ease;
+}
+
+.user-guide-tour-tooltip.placement-bottom {
+    animation: slideInBottom 0.3s ease;
+}
+
+.user-guide-tour-tooltip.placement-left {
+    animation: slideInLeft 0.3s ease;
+}
+
+.user-guide-tour-tooltip.placement-right {
+    animation: slideInRight 0.3s ease;
+}
+
+@keyframes slideInTop {
+    from {
+        opacity: 0;
+        transform: translateY(-10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+@keyframes slideInBottom {
+    from {
+        opacity: 0;
+        transform: translateY(10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+@keyframes slideInLeft {
+    from {
+        opacity: 0;
+        transform: translateX(-10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateX(0);
+    }
+}
+
+@keyframes slideInRight {
+    from {
+        opacity: 0;
+        transform: translateX(10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateX(0);
+    }
+}
+
+/* Tour Step Content */
+.tour-step-content {
+    padding: 24px;
+}
+
+.tour-progress {
+    font-size: 12px;
+    color: #7f8c8d;
+    margin-bottom: 12px;
+    text-transform: uppercase;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+}
+
+.tour-step-content h3 {
+    margin: 0 0 12px 0;
+    font-size: 20px;
+    color: #2c3e50;
+    font-weight: 600;
+}
+
+.tour-step-content p {
+    margin: 0 0 20px 0;
+    font-size: 14px;
+    line-height: 1.6;
+    color: #555;
+}
+
+.tour-step-content ul {
+    margin: 0 0 20px 0;
+    padding-left: 24px;
+}
+
+.tour-step-content li {
+    margin-bottom: 8px;
+    font-size: 14px;
+    line-height: 1.5;
+    color: #555;
+}
+
+.tour-step-content h4 {
+    margin: 16px 0 8px 0;
+    font-size: 15px;
+    color: #34495e;
+    font-weight: 600;
+}
+
+.tour-step-content code {
+    padding: 2px 6px;
+    background: #ecf0f1;
+    border-radius: 3px;
+    font-family: 'Courier New', monospace;
+    font-size: 13px;
+    color: #e74c3c;
+}
+
+/* Tour Actions */
+.tour-actions {
+    display: flex;
+    gap: 10px;
+    justify-content: flex-end;
+    margin-top: 20px;
+    padding-top: 20px;
+    border-top: 1px solid #ecf0f1;
+}
+
+.tour-actions .btn {
+    padding: 8px 16px;
+    font-size: 14px;
+    border-radius: 4px;
+    border: none;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    font-weight: 500;
+}
+
+.tour-actions .btn-primary {
+    background: #3498db;
+    color: #fff;
+}
+
+.tour-actions .btn-primary:hover {
+    background: #2980b9;
+    transform: translateY(-1px);
+    box-shadow: 0 2px 8px rgba(52, 152, 219, 0.3);
+}
+
+.tour-actions .btn-secondary {
+    background: #ecf0f1;
+    color: #555;
+}
+
+.tour-actions .btn-secondary:hover {
+    background: #d5dbdb;
+}
+
+.tour-actions .btn:active {
+    transform: scale(0.98);
+}
+
+/* Tour arrow indicators */
+.user-guide-tour-tooltip::before {
+    content: '';
+    position: absolute;
+    width: 0;
+    height: 0;
+    border: 10px solid transparent;
+}
+
+.user-guide-tour-tooltip.placement-top::before {
+    bottom: -20px;
+    left: 50%;
+    transform: translateX(-50%);
+    border-top-color: #fff;
+}
+
+.user-guide-tour-tooltip.placement-bottom::before {
+    top: -20px;
+    left: 50%;
+    transform: translateX(-50%);
+    border-bottom-color: #fff;
+}
+
+.user-guide-tour-tooltip.placement-left::before {
+    right: -20px;
+    top: 50%;
+    transform: translateY(-50%);
+    border-left-color: #fff;
+}
+
+.user-guide-tour-tooltip.placement-right::before {
+    left: -20px;
+    top: 50%;
+    transform: translateY(-50%);
+    border-right-color: #fff;
+}
+
+/* ============================================
+   Help Modal Content Styling
+   ============================================ */
+
+.user-guide-help-content h3 {
+    margin-top: 0;
+    color: #2c3e50;
+}
+
+.user-guide-help-content ul {
+    padding-left: 24px;
+}
+
+.user-guide-help-content li {
+    margin-bottom: 8px;
+    line-height: 1.6;
+}
+
+.user-guide-help-content strong {
+    color: #34495e;
+}
+
+.user-guide-help-content code {
+    padding: 2px 6px;
+    background: #ecf0f1;
+    border-radius: 3px;
+    font-family: 'Courier New', monospace;
+    font-size: 13px;
+    color: #e74c3c;
+}
+
+/* ============================================
+   Help Menu
+   ============================================ */
+
+.help-menu-content h3 {
+    margin-top: 0;
+    margin-bottom: 24px;
+    color: #2c3e50;
+    font-size: 24px;
+}
+
+.help-section {
+    margin-bottom: 32px;
+}
+
+.help-section:last-child {
+    margin-bottom: 0;
+}
+
+.help-section h4 {
+    margin: 0 0 16px 0;
+    color: #34495e;
+    font-size: 16px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.help-menu-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 16px;
+    width: 100%;
+    padding: 16px;
+    margin-bottom: 12px;
+    background: #f8f9fa;
+    border: 1px solid #e9ecef;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    text-align: left;
+}
+
+.help-menu-item:hover {
+    background: #e9ecef;
+    border-color: #3498db;
+    transform: translateX(4px);
+    box-shadow: -4px 0 0 #3498db;
+}
+
+.help-menu-item:active {
+    transform: translateX(2px);
+}
+
+.help-menu-item .help-icon {
+    font-size: 32px;
+    line-height: 1;
+    flex-shrink: 0;
+}
+
+.help-menu-item div {
+    flex: 1;
+}
+
+.help-menu-item strong {
+    display: block;
+    margin-bottom: 4px;
+    color: #2c3e50;
+    font-size: 15px;
+    font-weight: 600;
+}
+
+.help-menu-item p {
+    margin: 0;
+    color: #7f8c8d;
+    font-size: 13px;
+    line-height: 1.4;
+}
+
+/* Keyboard shortcuts section */
+.keyboard-shortcuts {
+    background: #f8f9fa;
+    border-radius: 6px;
+    padding: 16px;
+}
+
+.shortcut-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 0;
+    border-bottom: 1px solid #e9ecef;
+}
+
+.shortcut-item:last-child {
+    border-bottom: none;
+}
+
+.shortcut-item kbd {
+    display: inline-block;
+    padding: 4px 8px;
+    background: #fff;
+    border: 1px solid #d5dbdb;
+    border-radius: 4px;
+    font-family: 'Courier New', monospace;
+    font-size: 12px;
+    font-weight: 600;
+    color: #2c3e50;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+}
+
+.shortcut-item span {
+    color: #7f8c8d;
+    font-size: 13px;
+}
+
+/* ============================================
+   Responsive Design
+   ============================================ */
+
+@media (max-width: 768px) {
+    .user-guide-tour-modal,
+    .user-guide-tour-tooltip {
+        max-width: 90%;
+        width: 90%;
+    }
+
+    .tour-step-content {
+        padding: 20px;
+    }
+
+    .tour-step-content h3 {
+        font-size: 18px;
+    }
+
+    .tour-actions {
+        flex-direction: column;
+    }
+
+    .tour-actions .btn {
+        width: 100%;
+    }
+
+    /* Stack help icon below on mobile */
+    .help-icon {
+        display: block;
+        margin: 8px 0 0 0;
+        width: 24px;
+        height: 24px;
+        font-size: 14px;
+    }
+}
+
+/* ============================================
+   Accessibility
+   ============================================ */
+
+/* Focus styles for keyboard navigation */
+.help-icon:focus {
+    outline: 2px solid #3498db;
+    outline-offset: 2px;
+}
+
+.tour-actions .btn:focus {
+    outline: 2px solid #3498db;
+    outline-offset: 2px;
+}
+
+/* Reduced motion support */
+@media (prefers-reduced-motion: reduce) {
+    .user-guide-tooltip,
+    .user-guide-tour-modal,
+    .user-guide-tour-tooltip,
+    .user-guide-backdrop,
+    .user-guide-highlight {
+        animation: none;
+        transition: none;
+    }
+
+    .help-icon:hover {
+        transform: none;
+    }
+}
+
+/* High contrast mode support */
+@media (prefers-contrast: high) {
+    .user-guide-tooltip {
+        border: 2px solid #fff;
+    }
+
+    .user-guide-tour-modal,
+    .user-guide-tour-tooltip {
+        border: 3px solid #000;
+    }
+
+    .help-icon {
+        border: 2px solid #fff;
+    }
+}
+
+/* ============================================
+   Keyboard Shortcuts Modal
+   ============================================ */
+
+.keyboard-shortcuts-modal h3 {
+    margin-top: 0;
+    margin-bottom: 24px;
+    color: #2c3e50;
+    font-size: 24px;
+}
+
+.shortcuts-category {
+    margin-bottom: 32px;
+}
+
+.shortcuts-category:last-child {
+    margin-bottom: 0;
+}
+
+.shortcuts-category h4 {
+    margin: 0 0 16px 0;
+    color: #34495e;
+    font-size: 16px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    padding-bottom: 8px;
+    border-bottom: 2px solid #ecf0f1;
+}
+
+.shortcuts-list {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.shortcut-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 16px;
+    background: #f8f9fa;
+    border-radius: 6px;
+    transition: background 0.2s ease;
+}
+
+.shortcut-row:hover {
+    background: #e9ecef;
+}
+
+.shortcut-keys {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 150px;
+}
+
+.shortcut-keys kbd {
+    display: inline-block;
+    padding: 4px 8px;
+    background: #fff;
+    border: 1px solid #d5dbdb;
+    border-radius: 4px;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    font-size: 12px;
+    font-weight: 600;
+    color: #2c3e50;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+    min-width: 32px;
+    text-align: center;
+}
+
+.shortcut-desc {
+    color: #555;
+    font-size: 14px;
+    flex: 1;
+    text-align: right;
+}
+
+/* ============================================
+   Print Styles
+   ============================================ */
+
+@media print {
+    .user-guide-tooltip,
+    .user-guide-tour-modal,
+    .user-guide-tour-tooltip,
+    .user-guide-backdrop,
+    .help-icon,
+    .keyboard-shortcuts-modal {
+        display: none !important;
+    }
+
+    .user-guide-highlight {
+        box-shadow: none !important;
+    }
+}
+
+/* Responsive for keyboard shortcuts modal */
+@media (max-width: 768px) {
+    .shortcut-row {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 8px;
+    }
+
+    .shortcut-keys {
+        min-width: auto;
+    }
+
+    .shortcut-desc {
+        text-align: left;
+    }
+}
